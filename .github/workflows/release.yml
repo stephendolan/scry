@@ -22,7 +22,7 @@ jobs:
 
       - name: Build static binary
         run: |
-          shards build --production --release --static --no-debug
+          shards build scry --production --release --static --no-debug
           strip bin/scry
           chmod +x bin/scry
 
@@ -52,7 +52,7 @@ jobs:
 
       - name: Build binary
         run: |
-          shards build --production --release --no-debug
+          shards build scry --production --release --no-debug
           strip bin/scry
           chmod +x bin/scry
 
@@ -82,7 +82,7 @@ jobs:
 
       - name: Build binary
         run: |
-          shards build --production --release --no-debug
+          shards build scry --production --release --no-debug
           strip bin/scry
           chmod +x bin/scry
 
