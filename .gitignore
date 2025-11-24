@@ -1,0 +1,23 @@
+# Dependencies
+/lib/
+/.shards/
+
+# Build artifacts
+/bin/
+*.dwarf
+
+# Generated docs
+/docs/
+
+# Editor/IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# macOS
+.DS_Store
+
+# Shard lock (optional - uncomment if you want to track it)
+# shard.lock

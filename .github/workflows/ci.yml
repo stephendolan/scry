@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  format:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
+      - name: Check format
+        run: crystal tool format --check
+
+  lint:
+    name: Ameba Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
+      - name: Install dependencies
+        run: shards install
+      - name: Run Ameba
+        run: ./bin/ameba
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
+      - name: Install dependencies
+        run: shards install
+      - name: Run tests
+        run: crystal spec -Dspec
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.18.2
+      - name: Install dependencies
+        run: shards install
+      - name: Build
+        run: shards build --release --no-debug
