@@ -48,9 +48,12 @@ module RawMode
 
   def self.enable
     return if @@raw_mode
+    return unless STDIN.tty?
 
     original = uninitialized LibC::Termios
-    LibC.tcgetattr(STDIN.fd, pointerof(original))
+    result = LibC.tcgetattr(STDIN.fd, pointerof(original))
+    return if result != 0
+
     @@original = original
 
     raw = original
@@ -58,7 +61,9 @@ module RawMode
     raw.c_cc[16] = 1_u8 # VMIN
     raw.c_cc[17] = 0_u8 # VTIME
 
-    LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(raw))
+    result = LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(raw))
+    return if result != 0
+
     @@raw_mode = true
   end
 
@@ -69,6 +74,15 @@ module RawMode
       LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(o))
     end
     @@raw_mode = false
+  end
+
+  def self.force_restore
+    if orig = @@original
+      o = orig
+      LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(o))
+    end
+    @@raw_mode = false
+    STDERR.print("\e[?25h")
   end
 end
 
@@ -305,6 +319,8 @@ class ScrySelector
     setup_terminal
 
     Signal::WINCH.trap { UI.refresh_size }
+    Signal::INT.trap { RawMode.force_restore; exit(130) }
+    Signal::TERM.trap { RawMode.force_restore; exit(143) }
 
     RawMode.enable
     main_loop
@@ -348,26 +364,32 @@ class ScrySelector
   private def get_scries : Array(ScryDir)
     all = load_all_scries
 
-    scored = all.map do |scry|
-      scry.score = calculate_score(scry, @input_buffer)
-      scry
-    end
-
     if @input_buffer.empty?
+      scored = all.map do |scry|
+        scry.score = calculate_score(scry, "")
+        scry
+      end
       scored.sort_by { |scry| -scry.score }
     else
-      scored.select { |scry| scry.score > 0 }.sort_by! { |scry| -scry.score }
+      matched = all.compact_map do |scry|
+        fuzzy_score = Scoring.fuzzy_match(scry.name, @input_buffer)
+        if fuzzy_score > 0
+          scry.score = calculate_score(scry, @input_buffer, fuzzy_score)
+          scry
+        end
+      end
+      matched.sort_by! { |scry| -scry.score }
     end
   end
 
-  private def calculate_score(scry : ScryDir, query : String) : Float64
+  private def calculate_score(scry : ScryDir, query : String, fuzzy_score : Float64 = 0.0) : Float64
     score = 0.0
 
     if scry.name.matches?(/^\d{4}-\d{2}-\d{2}-/)
       score += 2.0
     end
 
-    score += Scoring.fuzzy_match(scry.name, query)
+    score += fuzzy_score > 0 ? fuzzy_score : Scoring.fuzzy_match(scry.name, query)
 
     now = Time.utc
     days_old = (now - scry.ctime).total_seconds / 86400
@@ -571,62 +593,79 @@ class ScrySelector
       full_path = File.join(@base_path, final_name)
       @selected = {type: :mkdir, path: full_path}
     else
-      RawMode.disable
-      UI.cls
-      STDERR.puts "Enter new scry name:"
-      STDERR.print "> #{date_prefix}-"
-      STDERR.print("\e[?25h")
+      begin
+        RawMode.disable
+        UI.cls
+        STDERR.puts "Enter new scry name:"
+        STDERR.print "> #{date_prefix}-"
+        STDERR.print("\e[?25h")
 
-      entry = STDIN.gets.try(&.chomp) || ""
+        entry = STDIN.gets.try(&.chomp) || ""
 
-      if entry.empty?
-        @selected = nil
-        return
+        if entry.empty?
+          @selected = nil
+          return
+        end
+
+        final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
+        full_path = File.join(@base_path, final_name)
+        @selected = {type: :mkdir, path: full_path}
+      ensure
+        RawMode.enable
       end
-
-      final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
-      full_path = File.join(@base_path, final_name)
-      @selected = {type: :mkdir, path: full_path}
-
-      RawMode.enable
     end
   end
 
   private def handle_delete(scry : ScryDir)
-    size = `du -sh #{scry.path} 2>/dev/null`.strip.split(/\s+/).first? || "???"
-    files = `find #{scry.path} -type f 2>/dev/null | wc -l`.strip
-
-    RawMode.disable
-    UI.cls
-    STDERR.puts "Delete Directory"
-    STDERR.puts
-    STDERR.puts "Are you sure you want to delete: #{scry.name}"
-    STDERR.puts "  Path: #{scry.path}"
-    STDERR.puts "  Files: #{files}"
-    STDERR.puts "  Size: #{size}"
-    STDERR.puts
-    STDERR.print "Type YES to confirm: "
-    STDERR.print("\e[?25h")
-
-    confirmation = STDIN.gets.try(&.chomp) || ""
-
-    if confirmation == "YES"
-      begin
-        if Dir.current == scry.path
-          Dir.cd(@base_path)
-        end
-        FileUtils.rm_rf(scry.path)
-        @delete_status = "Deleted: #{scry.name}"
-        @all_scries = nil
-      rescue ex
-        @delete_status = "Error: #{ex.message}"
-      end
-    else
-      @delete_status = "Delete cancelled"
+    size = begin
+      output = IO::Memory.new
+      Process.run("du", ["-sh", scry.path], output: output, error: Process::Redirect::Close)
+      output.to_s.strip.split(/\s+/).first? || "???"
+    rescue
+      "???"
     end
 
-    STDERR.print("\e[?25l")
-    RawMode.enable
+    files = begin
+      output = IO::Memory.new
+      Process.run("find", [scry.path, "-type", "f"], output: output, error: Process::Redirect::Close)
+      output.to_s.lines.size.to_s
+    rescue
+      "???"
+    end
+
+    begin
+      RawMode.disable
+      UI.cls
+      STDERR.puts "Delete Directory"
+      STDERR.puts
+      STDERR.puts "Are you sure you want to delete: #{scry.name}"
+      STDERR.puts "  Path: #{scry.path}"
+      STDERR.puts "  Files: #{files}"
+      STDERR.puts "  Size: #{size}"
+      STDERR.puts
+      STDERR.print "Type YES to confirm: "
+      STDERR.print("\e[?25h")
+
+      confirmation = STDIN.gets.try(&.chomp) || ""
+
+      if confirmation == "YES"
+        begin
+          if Dir.current == scry.path
+            Dir.cd(@base_path)
+          end
+          FileUtils.rm_rf(scry.path)
+          @delete_status = "Deleted: #{scry.name}"
+          @all_scries = nil
+        rescue ex
+          @delete_status = "Error: #{ex.message}"
+        end
+      else
+        @delete_status = "Delete cancelled"
+      end
+    ensure
+      STDERR.print("\e[?25l")
+      RawMode.enable
+    end
   end
 end
 
@@ -699,42 +738,38 @@ end
     exit 0
   end
 
-  command = ARGV.shift?
-
-  case command
-  when nil
-    print_help(config)
-    exit 2
-  when "init"
+  if ARGV.first? == "init"
     print_init_script
     exit 0
-  when "cd"
-    search_term = ARGV.join(" ")
-    selector = ScrySelector.new(search_term, base_path: config.effective_path)
+  end
 
-    unless STDIN.tty? && STDERR.tty?
-      STDERR.puts "Error: scry requires an interactive terminal"
-      exit 1
+  search_term = if ARGV.first? == "cd"
+                  ARGV.shift
+                  ARGV.join(" ")
+                else
+                  ARGV.join(" ")
+                end
+
+  selector = ScrySelector.new(search_term, base_path: config.effective_path)
+
+  unless STDIN.tty? && STDERR.tty?
+    STDERR.puts "Error: scry requires an interactive terminal"
+    exit 1
+  end
+
+  result = selector.run
+
+  if result
+    path = result[:path]
+
+    if result[:type] == :mkdir
+      FileUtils.mkdir_p(path)
+      instructions_path = File.join(path, config.effective_instructions)
+      name = File.basename(path).sub(/^\d{4}-\d{2}-\d{2}-/, "")
+      File.write(instructions_path, generate_readme(name))
     end
 
-    result = selector.run
-
-    if result
-      path = result[:path]
-
-      if result[:type] == :mkdir
-        FileUtils.mkdir_p(path)
-        instructions_path = File.join(path, config.effective_instructions)
-        name = File.basename(path).sub(/^\d{4}-\d{2}-\d{2}-/, "")
-        File.write(instructions_path, generate_readme(name))
-      end
-
-      File.touch(path)
-      puts "cd '#{path}' && #{config.effective_agent}"
-    end
-  else
-    STDERR.puts "Unknown command: #{command}"
-    print_help(config)
-    exit 2
+    File.touch(path)
+    puts "cd '#{path}' && #{config.effective_agent}"
   end
 {% end %}
