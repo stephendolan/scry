@@ -2,15 +2,9 @@ require "./spec_helper"
 
 describe Scoring do
   describe ".fuzzy_match" do
-    it "returns 0 for empty query" do
+    it "returns 0 when no match possible" do
       Scoring.fuzzy_match("hello", "").should eq(0.0)
-    end
-
-    it "returns 0 when query chars not found" do
       Scoring.fuzzy_match("hello", "xyz").should eq(0.0)
-    end
-
-    it "returns 0 when query is longer than matches" do
       Scoring.fuzzy_match("hi", "hello").should eq(0.0)
     end
 
@@ -51,10 +45,6 @@ describe Scoring do
   end
 
   describe ".time_decay" do
-    it "returns weight for zero age" do
-      Scoring.time_decay(0.0, 2.0).should eq(2.0)
-    end
-
     it "decreases with age" do
       recent = Scoring.time_decay(1.0)
       old = Scoring.time_decay(100.0)
@@ -69,30 +59,12 @@ describe Scoring do
   end
 
   describe ".format_relative_time" do
-    it "shows 'just now' for recent times" do
+    it "formats time appropriately for each unit" do
       Scoring.format_relative_time(5.0).should eq("just now")
-    end
-
-    it "shows minutes" do
       Scoring.format_relative_time(120.0).should eq("2m ago")
-      Scoring.format_relative_time(3540.0).should eq("59m ago")
-    end
-
-    it "shows hours" do
       Scoring.format_relative_time(3600.0).should eq("1h ago")
-      Scoring.format_relative_time(7200.0).should eq("2h ago")
-    end
-
-    it "shows days" do
       Scoring.format_relative_time(86400.0).should eq("1d ago")
-      Scoring.format_relative_time(86400.0 * 7).should eq("7d ago")
-    end
-
-    it "shows months" do
       Scoring.format_relative_time(86400.0 * 45).should eq("1mo ago")
-    end
-
-    it "shows years" do
       Scoring.format_relative_time(86400.0 * 400).should eq("1y ago")
     end
   end

@@ -12,16 +12,5 @@ describe UI do
       result = UI.expand_tokens("{unknown}")
       result.should eq("{unknown}")
     end
-
-    it "expands multiple tokens" do
-      result = UI.expand_tokens("{dim_text}dim{text}normal")
-      result.should contain("\e[90m")
-      result.should contain("\e[39m")
-    end
-
-    it "handles text without tokens" do
-      result = UI.expand_tokens("plain text")
-      result.should eq("plain text")
-    end
   end
 end

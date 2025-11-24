@@ -11,15 +11,14 @@ struct Config
   def self.load : Config
     config_path = File.expand_path("~/.config/scry/config.json", home: Path.home)
 
-    if File.exists?(config_path)
-      begin
-        return Config.from_json(File.read(config_path))
-      rescue ex
-        STDERR.puts "Warning: Could not parse config: #{ex.message}"
-      end
-    end
+    return Config.new unless File.exists?(config_path)
 
-    Config.new
+    begin
+      Config.from_json(File.read(config_path))
+    rescue ex
+      STDERR.puts "Warning: Could not parse config: #{ex.message}"
+      Config.new
+    end
   end
 
   def initialize
@@ -29,8 +28,7 @@ struct Config
   end
 
   def effective_path : String
-    path = ENV["SCRY_PATH"]? || @path
-    path.starts_with?("~") ? File.expand_path(path, home: Path.home) : path
+    expand_home_path(ENV["SCRY_PATH"]? || @path)
   end
 
   def effective_agent : String
@@ -40,6 +38,10 @@ struct Config
   def effective_instructions : String
     ENV["SCRY_INSTRUCTIONS"]? || @instructions
   end
+
+  private def expand_home_path(path : String) : String
+    path.starts_with?("~") ? File.expand_path(path, home: Path.home) : path
+  end
 end
 
 module RawMode
@@ -47,42 +49,48 @@ module RawMode
   @@raw_mode = false
 
   def self.enable
-    return if @@raw_mode
-    return unless STDIN.tty?
+    return if @@raw_mode || !STDIN.tty?
 
-    original = uninitialized LibC::Termios
-    result = LibC.tcgetattr(STDIN.fd, pointerof(original))
-    return if result != 0
+    original = fetch_current_termios
+    return unless original
 
     @@original = original
-
-    raw = original
-    raw.c_lflag &= ~(LibC::ICANON | LibC::ECHO)
-    raw.c_cc[16] = 1_u8 # VMIN
-    raw.c_cc[17] = 0_u8 # VTIME
-
-    result = LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(raw))
-    return if result != 0
+    return unless apply_raw_mode(original)
 
     @@raw_mode = true
   end
 
+  private def self.fetch_current_termios : LibC::Termios?
+    original = uninitialized LibC::Termios
+    result = LibC.tcgetattr(STDIN.fd, pointerof(original))
+    result == 0 ? original : nil
+  end
+
+  private def self.apply_raw_mode(original : LibC::Termios) : Bool
+    raw = original
+    raw.c_lflag &= ~(LibC::ICANON | LibC::ECHO)
+    raw.c_cc[16] = 1_u8
+    raw.c_cc[17] = 0_u8
+
+    LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(raw)) == 0
+  end
+
   def self.disable
     return unless @@raw_mode
-    if orig = @@original
-      o = orig
-      LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(o))
-    end
+    restore_termios
     @@raw_mode = false
   end
 
   def self.force_restore
-    if orig = @@original
-      o = orig
-      LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(o))
-    end
+    restore_termios
     @@raw_mode = false
     STDERR.print("\e[?25h")
+  end
+
+  private def self.restore_termios
+    return unless orig = @@original
+    o = orig
+    LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(o))
   end
 end
 
@@ -124,21 +132,32 @@ module UI
   end
 
   def self.flush(io = STDERR)
+    complete_current_line
+
+    if io.tty?
+      flush_tty(io)
+    else
+      flush_non_tty(io)
+    end
+  end
+
+  private def self.complete_current_line
     unless @@current_line.empty?
       @@buffer << @@current_line
       @@current_line = ""
     end
+  end
 
-    unless io.tty?
-      plain = @@buffer.join("\n").gsub(/\{.*?\}/, "")
-      io.print(plain)
-      io.print("\n") unless plain.ends_with?("\n")
-      @@last_buffer.clear
-      @@buffer.clear
-      io.flush
-      return
-    end
+  private def self.flush_non_tty(io)
+    plain = @@buffer.join("\n").gsub(/\{.*?\}/, "")
+    io.print(plain)
+    io.print("\n") unless plain.ends_with?("\n")
+    @@last_buffer.clear
+    @@buffer.clear
+    io.flush
+  end
 
+  private def self.flush_tty(io)
     io.print("\e[H")
 
     max_lines = {@@buffer.size, @@last_buffer.size}.max
@@ -174,17 +193,16 @@ module UI
   end
 
   def self.width : Int32
-    @@width ||= begin
-      result = `tput cols 2>/dev/null`.strip.to_i?
-      result && result > 0 ? result : 80
-    end
+    @@width ||= detect_terminal_dimension("cols", 80)
   end
 
   def self.height : Int32
-    @@height ||= begin
-      result = `tput lines 2>/dev/null`.strip.to_i?
-      result && result > 0 ? result : 24
-    end
+    @@height ||= detect_terminal_dimension("lines", 24)
+  end
+
+  private def self.detect_terminal_dimension(dimension : String, default : Int32) : Int32
+    result = `tput #{dimension} 2>/dev/null`.strip.to_i?
+    result && result > 0 ? result : default
   end
 
   def self.refresh_size
@@ -193,23 +211,32 @@ module UI
   end
 
   def self.read_key : String
-    buf = Bytes.new(1)
-    STDIN.read(buf)
-    input = String.new(buf)
+    input = read_first_byte
 
     if input == "\e"
-      STDIN.read_timeout = 0.05.seconds
-      begin
-        extra = Bytes.new(5)
-        bytes_read = STDIN.read(extra)
-        input += String.new(extra[0, bytes_read]) if bytes_read > 0
-      rescue IO::TimeoutError
-      ensure
-        STDIN.read_timeout = nil
-      end
+      input += read_escape_sequence
     end
 
     input
+  end
+
+  private def self.read_first_byte : String
+    buf = Bytes.new(1)
+    STDIN.read(buf)
+    String.new(buf)
+  end
+
+  private def self.read_escape_sequence : String
+    STDIN.read_timeout = 0.05.seconds
+    begin
+      extra = Bytes.new(5)
+      bytes_read = STDIN.read(extra)
+      bytes_read > 0 ? String.new(extra[0, bytes_read]) : ""
+    rescue IO::TimeoutError
+      ""
+    ensure
+      STDIN.read_timeout = nil
+    end
   end
 end
 
@@ -230,44 +257,47 @@ module Scoring
     return 0.0 if query.empty?
 
     text_lower = text.downcase
-    query_lower = query.downcase
-    query_chars = query_lower.chars
-    query_len = query_chars.size
-    text_len = text_lower.size
+    query_chars = query.downcase.chars
 
+    last_pos, score = find_matches(text_lower, query_chars)
+    return 0.0 if score == 0.0
+
+    apply_scoring_modifiers(score, query_chars.size, last_pos, text.size)
+  end
+
+  private def self.find_matches(text : String, query_chars : Array(Char)) : {Int32, Float64}
     score = 0.0
     last_pos = -1
     query_idx = 0
-    i = 0
 
-    while i < text_len
-      break if query_idx >= query_len
+    text.each_char_with_index do |char, i|
+      break if query_idx >= query_chars.size
 
-      if text_lower[i] == query_chars[query_idx]
+      if char == query_chars[query_idx]
         score += 1.0
-
-        is_boundary = (i == 0) || !text_lower[i - 1].alphanumeric?
-        score += 1.0 if is_boundary
-
-        if last_pos >= 0
-          gap = i - last_pos - 1
-          score += 1.0 / Math.sqrt(gap + 1)
-        end
-
+        score += 1.0 if word_boundary?(text, i)
+        score += proximity_bonus(last_pos, i)
         last_pos = i
         query_idx += 1
       end
-
-      i += 1
     end
 
-    return 0.0 if query_idx < query_len
+    {last_pos, query_idx == query_chars.size ? score : 0.0}
+  end
 
-    if last_pos >= 0
-      score *= (query_len.to_f / (last_pos + 1))
-    end
+  private def self.word_boundary?(text : String, position : Int32) : Bool
+    position == 0 || !text[position - 1].alphanumeric?
+  end
 
-    score *= (10.0 / (text.size + 10.0))
+  private def self.proximity_bonus(last_pos : Int32, current_pos : Int32) : Float64
+    return 0.0 if last_pos < 0
+    gap = current_pos - last_pos - 1
+    1.0 / Math.sqrt(gap + 1)
+  end
+
+  private def self.apply_scoring_modifiers(score : Float64, query_len : Int32, last_pos : Int32, text_len : Int32) : Float64
+    score *= (query_len.to_f / (last_pos + 1)) if last_pos >= 0
+    score *= (10.0 / (text_len + 10.0))
     score
   end
 
@@ -307,12 +337,20 @@ class ScrySelector
   @all_scries : Array(ScryDir)?
 
   def initialize(search_term = "", base_path : String = "")
-    @search_term = search_term.gsub(/\s+/, "-")
+    @search_term = normalize_search_term(search_term)
     @input_buffer = @search_term
-    @base_path = base_path.empty? ? File.expand_path("~/scries") : base_path
+    @base_path = resolve_base_path(base_path)
     @selected = nil
 
     FileUtils.mkdir_p(@base_path) unless Dir.exists?(@base_path)
+  end
+
+  private def normalize_search_term(term : String) : String
+    term.gsub(/\s+/, "-")
+  end
+
+  private def resolve_base_path(path : String) : String
+    path.empty? ? File.expand_path("~/scries") : path
   end
 
   def run : NamedTuple(type: Symbol, path: String)?
@@ -343,62 +381,76 @@ class ScrySelector
       scries = [] of ScryDir
 
       Dir.each_child(@base_path) do |entry|
-        next if entry.starts_with?('.')
+        next if hidden?(entry)
 
         path = File.join(@base_path, entry)
         next unless File.directory?(path)
 
-        info = File.info(path)
-        scries << ScryDir.new(
-          name: entry,
-          path: path,
-          ctime: info.modification_time,
-          mtime: info.modification_time
-        )
+        scries << create_scry_dir(entry, path)
       end
 
       scries
     end
   end
 
+  private def hidden?(entry : String) : Bool
+    entry.starts_with?('.')
+  end
+
+  private def create_scry_dir(entry : String, path : String) : ScryDir
+    info = File.info(path)
+    ScryDir.new(
+      name: entry,
+      path: path,
+      ctime: info.modification_time,
+      mtime: info.modification_time
+    )
+  end
+
   private def get_scries : Array(ScryDir)
     all = load_all_scries
 
     if @input_buffer.empty?
-      scored = all.map do |scry|
-        scry.score = calculate_score(scry, "")
+      score_all_scries(all)
+    else
+      filter_and_score_scries(all)
+    end
+  end
+
+  private def score_all_scries(scries : Array(ScryDir)) : Array(ScryDir)
+    scries.each { |scry| scry.score = calculate_score(scry, "") }
+    scries.sort_by { |scry| -scry.score }
+  end
+
+  private def filter_and_score_scries(scries : Array(ScryDir)) : Array(ScryDir)
+    matched = scries.compact_map do |scry|
+      fuzzy_score = Scoring.fuzzy_match(scry.name, @input_buffer)
+      if fuzzy_score > 0
+        scry.score = calculate_score(scry, @input_buffer, fuzzy_score)
         scry
       end
-      scored.sort_by { |scry| -scry.score }
-    else
-      matched = all.compact_map do |scry|
-        fuzzy_score = Scoring.fuzzy_match(scry.name, @input_buffer)
-        if fuzzy_score > 0
-          scry.score = calculate_score(scry, @input_buffer, fuzzy_score)
-          scry
-        end
-      end
-      matched.sort_by! { |scry| -scry.score }
     end
+    matched.sort_by! { |scry| -scry.score }
   end
 
   private def calculate_score(scry : ScryDir, query : String, fuzzy_score : Float64 = 0.0) : Float64
     score = 0.0
-
-    if scry.name.matches?(/^\d{4}-\d{2}-\d{2}-/)
-      score += 2.0
-    end
-
+    score += 2.0 if date_prefixed?(scry.name)
     score += fuzzy_score > 0 ? fuzzy_score : Scoring.fuzzy_match(scry.name, query)
+    score += recency_score(scry)
+    score
+  end
 
+  private def date_prefixed?(name : String) : Bool
+    name.matches?(/^\d{4}-\d{2}-\d{2}-/)
+  end
+
+  private def recency_score(scry : ScryDir) : Float64
     now = Time.utc
     days_old = (now - scry.ctime).total_seconds / 86400
-    score += Scoring.time_decay(days_old, 2.0)
-
     hours_since_access = (now - scry.mtime).total_seconds / 3600
-    score += Scoring.time_decay(hours_since_access, 3.0)
 
-    score
+    Scoring.time_decay(days_old, 2.0) + Scoring.time_decay(hours_since_access, 3.0)
   end
 
   private def main_loop
@@ -411,139 +463,194 @@ class ScrySelector
       render(scries)
 
       key = UI.read_key
+      handle_key(key, scries, total_items)
 
-      case key
-      when "\r"
-        if @cursor_pos < scries.size
-          handle_selection(scries[@cursor_pos])
-        else
-          handle_create_new
-        end
-        break if @selected
-      when "\e[A", "\x10", "\x0B"
-        @cursor_pos = {@cursor_pos - 1, 0}.max
-      when "\e[B", "\x0E", "\n"
-        @cursor_pos = {@cursor_pos + 1, total_items - 1}.min
-      when "\e[C", "\e[D"
-        # ignore left/right arrows
-      when "\x7F", "\b"
-        @input_buffer = @input_buffer[0...-1] if @input_buffer.size > 0
-        @cursor_pos = 0
-      when "\x04"
-        if @cursor_pos < scries.size
-          handle_delete(scries[@cursor_pos])
-        end
-      when "\x03", "\e"
-        @selected = nil
-        break
-      else
-        if key.size == 1 && key[0].alphanumeric? || key[0].in?('-', '_', '.', ' ')
-          @input_buffer += key
-          @cursor_pos = 0
-        end
-      end
+      break if @selected || key.in?("\x03", "\e")
     end
 
     @selected
   end
 
+  private def handle_key(key : String, scries : Array(ScryDir), total_items : Int32)
+    case key
+    when "\r"
+      handle_enter(scries)
+    when "\e[A", "\x10", "\x0B"
+      move_cursor_up
+    when "\e[B", "\x0E", "\n"
+      move_cursor_down(total_items)
+    when "\e[C", "\e[D"
+      # ignore left/right arrows
+    when "\x7F", "\b"
+      handle_backspace
+    when "\x04"
+      handle_delete_key(scries)
+    when "\x03", "\e"
+      @selected = nil
+    else
+      handle_character_input(key)
+    end
+  end
+
+  private def handle_enter(scries : Array(ScryDir))
+    if @cursor_pos < scries.size
+      handle_selection(scries[@cursor_pos])
+    else
+      handle_create_new
+    end
+  end
+
+  private def move_cursor_up
+    @cursor_pos = {@cursor_pos - 1, 0}.max
+  end
+
+  private def move_cursor_down(total_items : Int32)
+    @cursor_pos = {@cursor_pos + 1, total_items - 1}.min
+  end
+
+  private def handle_backspace
+    @input_buffer = @input_buffer[0...-1] if @input_buffer.size > 0
+    @cursor_pos = 0
+  end
+
+  private def handle_delete_key(scries : Array(ScryDir))
+    handle_delete(scries[@cursor_pos]) if @cursor_pos < scries.size
+  end
+
+  private def handle_character_input(key : String)
+    if key.size == 1 && (key[0].alphanumeric? || key[0].in?('-', '_', '.', ' '))
+      @input_buffer += key
+      @cursor_pos = 0
+    end
+  end
+
   private def render(scries : Array(ScryDir))
     term_width = UI.width
     term_height = UI.height
-
     separator = "\u2500" * (term_width - 1)
 
+    render_header(separator)
+    render_items(scries, term_width, term_height, separator)
+    render_footer(separator)
+
+    UI.flush
+  end
+
+  private def render_header(separator : String)
     UI.puts "{h1}Scry"
     UI.puts "{dim_text}#{separator}"
-
     UI.puts "{highlight}Search: {reset}#{@input_buffer}"
     UI.puts "{dim_text}#{separator}"
+  end
 
+  private def render_items(scries : Array(ScryDir), term_width : Int32, term_height : Int32, separator : String)
     max_visible = {term_height - 8, 3}.max
     total_items = scries.size + 1
 
+    update_scroll_offset(max_visible)
+    visible_end = {@scroll_offset + max_visible, total_items}.min
+
+    (@scroll_offset...visible_end).each do |idx|
+      UI.puts if idx == scries.size && !scries.empty? && idx >= @scroll_offset
+
+      is_selected = idx == @cursor_pos
+      render_item(scries, idx, is_selected, term_width)
+      UI.puts
+    end
+
+    render_scroll_indicator(total_items, max_visible, visible_end, separator)
+  end
+
+  private def update_scroll_offset(max_visible : Int32)
     if @cursor_pos < @scroll_offset
       @scroll_offset = @cursor_pos
     elsif @cursor_pos >= @scroll_offset + max_visible
       @scroll_offset = @cursor_pos - max_visible + 1
     end
+  end
 
-    visible_end = {@scroll_offset + max_visible, total_items}.min
+  private def render_scroll_indicator(total_items : Int32, max_visible : Int32, visible_end : Int32, separator : String)
+    return unless total_items > max_visible
 
-    (@scroll_offset...visible_end).each do |idx|
-      if idx == scries.size && !scries.empty? && idx >= @scroll_offset
-        UI.puts
-      end
+    UI.puts "{dim_text}#{separator}"
+    UI.puts "{dim_text}[#{@scroll_offset + 1}-#{visible_end}/#{total_items}]"
+  end
 
-      is_selected = idx == @cursor_pos
-      UI.print(is_selected ? "{highlight}> {reset_fg}" : "  ")
+  private def render_item(scries : Array(ScryDir), idx : Int32, is_selected : Bool, term_width : Int32)
+    UI.print(is_selected ? "{highlight}> {reset_fg}" : "  ")
 
-      if idx < scries.size
-        scry = scries[idx]
+    if idx < scries.size
+      render_scry_item(scries[idx], is_selected, term_width)
+    else
+      render_create_new_item(is_selected, term_width)
+    end
+  end
 
-        UI.print "{start_selected}" if is_selected
+  private def render_scry_item(scry : ScryDir, is_selected : Bool, term_width : Int32)
+    UI.print "{start_selected}" if is_selected
 
-        if match = scry.name.match(/^(\d{4}-\d{2}-\d{2})-(.+)$/)
-          date_part = match[1]
-          name_part = match[2]
+    display_text = render_scry_name(scry)
 
-          UI.print "{dim_text}#{date_part}{reset_fg}"
+    time_text = format_relative_time(scry.mtime)
+    score_text = sprintf("%.1f", scry.score)
+    meta_text = "#{time_text}, #{score_text}"
 
-          separator_matches = !@input_buffer.empty? && @input_buffer.includes?('-')
-          if separator_matches
-            UI.print "{highlight}-{reset_fg}"
-          else
-            UI.print "{dim_text}-{reset_fg}"
-          end
+    padding = calculate_padding(display_text, meta_text, term_width)
 
-          if !@input_buffer.empty?
-            UI.print highlight_matches(name_part, @input_buffer, is_selected)
-          else
-            UI.print name_part
-          end
+    UI.print padding
+    UI.print "{end_selected}" if is_selected
+    UI.print " {dim_text}#{meta_text}{reset_fg}"
+  end
 
-          display_text = "#{date_part}-#{name_part}"
-        else
-          if !@input_buffer.empty?
-            UI.print highlight_matches(scry.name, @input_buffer, is_selected)
-          else
-            UI.print scry.name
-          end
-          display_text = scry.name
-        end
+  private def render_scry_name(scry : ScryDir) : String
+    if match = scry.name.match(/^(\d{4}-\d{2}-\d{2})-(.+)$/)
+      render_date_prefixed_name(match[1], match[2])
+    else
+      render_plain_name(scry.name)
+    end
+  end
 
-        time_text = format_relative_time(scry.mtime)
-        score_text = sprintf("%.1f", scry.score)
-        meta_text = "#{time_text}, #{score_text}"
+  private def render_date_prefixed_name(date_part : String, name_part : String) : String
+    UI.print "{dim_text}#{date_part}{reset_fg}"
 
-        meta_width = meta_text.size + 1
-        text_width = display_text.size
-        padding_needed = term_width - 5 - text_width - meta_width
-        padding = " " * {padding_needed, 1}.max
+    separator_matches = !@input_buffer.empty? && @input_buffer.includes?('-')
+    UI.print separator_matches ? "{highlight}-{reset_fg}" : "{dim_text}-{reset_fg}"
 
-        UI.print padding
-        UI.print "{end_selected}" if is_selected
-        UI.print " {dim_text}#{meta_text}{reset_fg}"
-      else
-        UI.print "+ "
-        UI.print "{start_selected}" if is_selected
-
-        display_text = @input_buffer.empty? ? "Create new" : "Create new: #{@input_buffer}"
-        UI.print display_text
-
-        text_width = display_text.size
-        padding_needed = term_width - 5 - text_width
-        UI.print " " * {padding_needed, 1}.max
-      end
-
-      UI.puts
+    if @input_buffer.empty?
+      UI.print name_part
+    else
+      UI.print highlight_matches(name_part, @input_buffer, false)
     end
 
-    if total_items > max_visible
-      UI.puts "{dim_text}#{separator}"
-      UI.puts "{dim_text}[#{@scroll_offset + 1}-#{visible_end}/#{total_items}]"
-    end
+    "#{date_part}-#{name_part}"
+  end
 
+  private def render_plain_name(name : String) : String
+    if @input_buffer.empty?
+      UI.print name
+    else
+      UI.print highlight_matches(name, @input_buffer, false)
+    end
+    name
+  end
+
+  private def render_create_new_item(is_selected : Bool, term_width : Int32)
+    UI.print "+ "
+    UI.print "{start_selected}" if is_selected
+
+    display_text = @input_buffer.empty? ? "Create new" : "Create new: #{@input_buffer}"
+    UI.print display_text
+
+    padding = " " * {term_width - 5 - display_text.size, 1}.max
+    UI.print padding
+  end
+
+  private def calculate_padding(display_text : String, meta_text : String, term_width : Int32) : String
+    padding_needed = term_width - 5 - display_text.size - meta_text.size - 1
+    " " * {padding_needed, 1}.max
+  end
+
+  private def render_footer(separator : String)
     UI.puts "{dim_text}#{separator}"
 
     if status = @delete_status
@@ -552,8 +659,6 @@ class ScrySelector
     else
       UI.puts "{dim_text}Up/Down: Navigate  Enter: Select  Ctrl-D: Delete  ESC: Cancel{reset}"
     end
-
-    UI.flush
   end
 
   private def format_relative_time(time : Time) : String
@@ -564,13 +669,11 @@ class ScrySelector
     return text if query.empty?
 
     result = ""
-    text_lower = text.downcase
-    query_lower = query.downcase
-    query_chars = query_lower.chars
+    query_chars = query.downcase.chars
     query_index = 0
 
     text.each_char_with_index do |char, i|
-      if query_index < query_chars.size && text_lower[i] == query_chars[query_index]
+      if matches_query?(text, i, query_chars, query_index)
         result += "{highlight}#{char}{text}"
         query_index += 1
       else
@@ -581,84 +684,63 @@ class ScrySelector
     result
   end
 
+  private def matches_query?(text : String, position : Int32, query_chars : Array(Char), query_index : Int32) : Bool
+    query_index < query_chars.size && text.downcase[position] == query_chars[query_index]
+  end
+
   private def handle_selection(scry : ScryDir)
     @selected = {type: :cd, path: scry.path}
   end
 
   private def handle_create_new
-    date_prefix = Time.local.to_s("%Y-%m-%d")
-
-    if !@input_buffer.empty?
-      final_name = "#{date_prefix}-#{@input_buffer}".gsub(/\s+/, "-")
-      full_path = File.join(@base_path, final_name)
-      @selected = {type: :mkdir, path: full_path}
+    if @input_buffer.empty?
+      prompt_for_name
     else
-      begin
-        RawMode.disable
-        UI.cls
-        STDERR.puts "Enter new scry name:"
-        STDERR.print "> #{date_prefix}-"
-        STDERR.print("\e[?25h")
-
-        entry = STDIN.gets.try(&.chomp) || ""
-
-        if entry.empty?
-          @selected = nil
-          return
-        end
-
-        final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
-        full_path = File.join(@base_path, final_name)
-        @selected = {type: :mkdir, path: full_path}
-      ensure
-        RawMode.enable
-      end
+      create_with_buffer_name
     end
   end
 
-  private def handle_delete(scry : ScryDir)
-    size = begin
-      output = IO::Memory.new
-      Process.run("du", ["-sh", scry.path], output: output, error: Process::Redirect::Close)
-      output.to_s.strip.split(/\s+/).first? || "???"
-    rescue
-      "???"
-    end
+  private def create_with_buffer_name
+    date_prefix = Time.local.to_s("%Y-%m-%d")
+    final_name = "#{date_prefix}-#{@input_buffer}".gsub(/\s+/, "-")
+    full_path = File.join(@base_path, final_name)
+    @selected = {type: :mkdir, path: full_path}
+  end
 
-    files = begin
-      output = IO::Memory.new
-      Process.run("find", [scry.path, "-type", "f"], output: output, error: Process::Redirect::Close)
-      output.to_s.lines.size.to_s
-    rescue
-      "???"
-    end
+  private def prompt_for_name
+    date_prefix = Time.local.to_s("%Y-%m-%d")
 
     begin
       RawMode.disable
       UI.cls
-      STDERR.puts "Delete Directory"
-      STDERR.puts
-      STDERR.puts "Are you sure you want to delete: #{scry.name}"
-      STDERR.puts "  Path: #{scry.path}"
-      STDERR.puts "  Files: #{files}"
-      STDERR.puts "  Size: #{size}"
-      STDERR.puts
-      STDERR.print "Type YES to confirm: "
+      STDERR.puts "Enter new scry name:"
+      STDERR.print "> #{date_prefix}-"
       STDERR.print("\e[?25h")
 
+      entry = STDIN.gets.try(&.chomp) || ""
+      return @selected = nil if entry.empty?
+
+      final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
+      full_path = File.join(@base_path, final_name)
+      @selected = {type: :mkdir, path: full_path}
+    ensure
+      RawMode.enable
+    end
+  end
+
+  private def handle_delete(scry : ScryDir)
+    size = get_directory_size(scry.path)
+    files = count_files(scry.path)
+
+    begin
+      RawMode.disable
+      UI.cls
+
+      display_delete_prompt(scry, files, size)
       confirmation = STDIN.gets.try(&.chomp) || ""
 
       if confirmation == "YES"
-        begin
-          if Dir.current == scry.path
-            Dir.cd(@base_path)
-          end
-          FileUtils.rm_rf(scry.path)
-          @delete_status = "Deleted: #{scry.name}"
-          @all_scries = nil
-        rescue ex
-          @delete_status = "Error: #{ex.message}"
-        end
+        delete_directory(scry)
       else
         @delete_status = "Delete cancelled"
       end
@@ -666,6 +748,43 @@ class ScrySelector
       STDERR.print("\e[?25l")
       RawMode.enable
     end
+  end
+
+  private def get_directory_size(path : String) : String
+    output = IO::Memory.new
+    Process.run("du", ["-sh", path], output: output, error: Process::Redirect::Close)
+    output.to_s.strip.split(/\s+/).first? || "???"
+  rescue
+    "???"
+  end
+
+  private def count_files(path : String) : String
+    output = IO::Memory.new
+    Process.run("find", [path, "-type", "f"], output: output, error: Process::Redirect::Close)
+    output.to_s.lines.size.to_s
+  rescue
+    "???"
+  end
+
+  private def display_delete_prompt(scry : ScryDir, files : String, size : String)
+    STDERR.puts "Delete Directory"
+    STDERR.puts
+    STDERR.puts "Are you sure you want to delete: #{scry.name}"
+    STDERR.puts "  Path: #{scry.path}"
+    STDERR.puts "  Files: #{files}"
+    STDERR.puts "  Size: #{size}"
+    STDERR.puts
+    STDERR.print "Type YES to confirm: "
+    STDERR.print("\e[?25h")
+  end
+
+  private def delete_directory(scry : ScryDir)
+    Dir.cd(@base_path) if Dir.current == scry.path
+    FileUtils.rm_rf(scry.path)
+    @delete_status = "Deleted: #{scry.name}"
+    @all_scries = nil
+  rescue ex
+    @delete_status = "Error: #{ex.message}"
   end
 end
 
