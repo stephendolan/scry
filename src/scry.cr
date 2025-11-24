@@ -1,6 +1,8 @@
 require "file_utils"
 require "json"
 
+VERSION = {{ `shards version`.stringify.chomp }}
+
 struct Config
   include JSON::Serializable
 
@@ -851,6 +853,11 @@ end
 
 {% unless flag?(:spec) %}
   config = Config.load
+
+  if ARGV.includes?("--version") || ARGV.includes?("-v")
+    puts VERSION
+    exit 0
+  end
 
   if ARGV.includes?("--help") || ARGV.includes?("-h")
     print_help(config)

@@ -11,6 +11,8 @@ license: MIT
 targets:
   scry:
     main: src/scry.cr
+  ameba:
+    main: lib/ameba/src/cli.cr
 
 development_dependencies:
   ameba:

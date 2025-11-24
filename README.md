@@ -1,8 +1,6 @@
 # Scry
 
-Temporary directories for AI coding agents.
-
-Quickly create and navigate date-prefixed directories for AI-assisted development sessions.
+Create and navigate date-prefixed directories for AI coding agents.
 
 ## Installation
 
@@ -43,27 +41,29 @@ Add to your `~/.zshrc` or `~/.bashrc`:
 eval "$(scry init)"
 ```
 
+This creates a shell function that wraps the binary. The CLI outputs shell commands (e.g., `cd '/path' && claude`) which the shell function evaluates in your current session.
+
 ## Usage
 
 ```bash
-scry                    # Browse all scries, launch agent
-scry redis              # Jump to matching scry
-scry api-experiment     # Create new scry if no match
+scry                    # Browse and select from existing scries
+scry redis              # Jump to matching scry or filter list
+scry api-experiment     # Create new scry if no match exists
 ```
 
 ### Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` | Navigate |
-| `Enter` | Select or create |
-| `Ctrl-D` | Delete |
-| `ESC` | Cancel |
-| Type | Filter |
+| `↑` / `↓` | Navigate list |
+| `Enter` | Select directory or create new |
+| `Ctrl-D` | Delete selected directory |
+| `ESC` | Exit without selecting |
+| Type | Filter results |
 
 ## Configuration
 
-Scry defaults to Claude but supports any AI coding agent.
+Defaults to Claude but supports any AI coding agent.
 
 ### Config file
 
@@ -79,33 +79,28 @@ Create `~/.config/scry/config.json`:
 
 ### Environment variables
 
-Override config with environment variables:
+Environment variables override config file settings:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SCRY_PATH` | Directory for scries | `~/scries` |
-| `SCRY_AGENT` | Command to run | `claude` |
-| `SCRY_INSTRUCTIONS` | Markdown file to create | `CLAUDE.md` |
+| `SCRY_PATH` | Storage directory | `~/scries` |
+| `SCRY_AGENT` | Command to launch | `claude` |
+| `SCRY_INSTRUCTIONS` | Instructions file to create | `CLAUDE.md` |
 
 ### Examples
 
 ```bash
-# Use with Aider
-export SCRY_AGENT=aider
-
-# Use with Codex
-export SCRY_AGENT=codex
-
-# Custom path
-export SCRY_PATH=~/experiments
+export SCRY_AGENT=aider           # Use with Aider
+export SCRY_AGENT=codex           # Use with Codex
+export SCRY_PATH=~/experiments    # Custom storage path
 ```
 
 ## How it works
 
-1. Creates directories like `2024-11-24-redis-experiment`
-2. Fuzzy search with smart scoring (recency, word boundaries)
-3. `cd` into directory and launch your AI agent
-4. Seeds new directories with an instructions file
+1. Creates date-prefixed directories: `2024-11-24-redis-experiment`
+2. Fuzzy search with smart scoring (recency, word boundaries, proximity)
+3. Changes to selected directory and launches your AI agent
+4. Seeds new directories with instructions file
 
 ## Development
 
