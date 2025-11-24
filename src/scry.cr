@@ -473,11 +473,11 @@ class ScrySelector
 
   private def handle_key(key : String, scries : Array(ScryDir), total_items : Int32)
     case key
-    when "\r"
+    when "\r", "\n"
       handle_enter(scries)
     when "\e[A", "\x10", "\x0B"
       move_cursor_up
-    when "\e[B", "\x0E", "\n"
+    when "\e[B", "\x0E"
       move_cursor_down(total_items)
     when "\e[C", "\e[D"
       # ignore left/right arrows
