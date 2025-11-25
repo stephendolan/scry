@@ -39,7 +39,7 @@ jobs:
 
   build-macos-intel:
     name: Build macOS (x86_64)
-    runs-on: macos-13
+    runs-on: macos-13-large
     steps:
       - uses: actions/checkout@v4
 
