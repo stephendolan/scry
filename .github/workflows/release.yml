@@ -101,6 +101,8 @@ jobs:
     name: Create Release
     needs: [build-linux, build-macos-intel, build-macos-arm]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
