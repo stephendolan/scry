@@ -242,6 +242,33 @@ module UI
   end
 end
 
+module KeyboardInput
+  abstract def read_key : String
+end
+
+class StandardKeyboard
+  include KeyboardInput
+
+  def read_key : String
+    UI.read_key
+  end
+end
+
+class MockKeyboard
+  include KeyboardInput
+
+  getter keys_read : Int32 = 0
+
+  def initialize(@keys : Array(String))
+  end
+
+  def read_key : String
+    key = @keys[@keys_read]? || "\e"
+    @keys_read += 1
+    key
+  end
+end
+
 struct ScryDir
   getter name : String
   getter path : String
@@ -337,15 +364,24 @@ class ScrySelector
   @base_path : String
   @delete_status : String?
   @all_scries : Array(ScryDir)?
+  @keyboard : KeyboardInput
+  @output : IO
+  @interactive : Bool
 
-  def initialize(search_term = "", base_path : String = "")
+  def initialize(search_term = "", base_path : String = "", keyboard : KeyboardInput? = nil, output : IO? = nil, interactive : Bool = true)
     @search_term = normalize_search_term(search_term)
     @input_buffer = @search_term
     @base_path = resolve_base_path(base_path)
     @selected = nil
+    @keyboard = keyboard || StandardKeyboard.new
+    @output = output || STDERR
+    @interactive = interactive
 
     FileUtils.mkdir_p(@base_path) unless Dir.exists?(@base_path)
   end
+
+  getter cursor_pos : Int32
+  getter input_buffer : String
 
   private def normalize_search_term(term : String) : String
     term.gsub(/\s+/, "-")
@@ -358,24 +394,30 @@ class ScrySelector
   def run : NamedTuple(type: Symbol, path: String)?
     setup_terminal
 
-    Signal::WINCH.trap { UI.refresh_size }
-    Signal::INT.trap { RawMode.force_restore; exit(130) }
-    Signal::TERM.trap { RawMode.force_restore; exit(143) }
+    if @interactive
+      Signal::WINCH.trap { UI.refresh_size }
+      Signal::INT.trap { RawMode.force_restore; exit(130) }
+      Signal::TERM.trap { RawMode.force_restore; exit(143) }
+      RawMode.enable
+    end
 
-    RawMode.enable
     main_loop
   ensure
-    restore_terminal
-    RawMode.disable
+    if @interactive
+      restore_terminal
+      RawMode.disable
+    end
   end
 
   private def setup_terminal
+    return unless @interactive
     UI.cls
-    STDERR.print("\e[2J\e[H\e[?25l")
+    @output.print("\e[2J\e[H\e[?25l")
   end
 
   private def restore_terminal
-    STDERR.print("\e[2J\e[H\e[?25h")
+    return unless @interactive
+    @output.print("\e[2J\e[H\e[?25h")
   end
 
   private def load_all_scries : Array(ScryDir)
@@ -464,7 +506,7 @@ class ScrySelector
 
       render(scries)
 
-      key = UI.read_key
+      key = @keyboard.read_key
       handle_key(key, scries, total_items)
 
       break if @selected || key.in?("\x03", "\e")
@@ -535,7 +577,7 @@ class ScrySelector
     render_items(scries, term_width, term_height, separator)
     render_footer(separator)
 
-    UI.flush
+    UI.flush(@output)
   end
 
   private def render_header(separator : String)
