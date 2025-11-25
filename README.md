@@ -2,6 +2,8 @@
 
 Create and navigate date-prefixed directories for AI coding agents.
 
+Inspired by Toby Lütke's [try](https://github.com/tobi/try).
+
 ## Installation
 
 ### From releases
@@ -46,9 +48,9 @@ This creates a shell function that wraps the binary. The CLI outputs shell comma
 ## Usage
 
 ```bash
-scry                    # Browse and select from existing scries
-scry redis              # Jump to matching scry or filter list
-scry api-experiment     # Create new scry if no match exists
+scry                      # Browse and select from existing scries
+scry metrics              # Jump to matching scry or filter list
+scry order-daycare-lunch  # Create new scry if no match exists
 ```
 
 ### Keyboard shortcuts
@@ -97,7 +99,7 @@ export SCRY_PATH=~/experiments    # Custom storage path
 
 ## How it works
 
-1. Creates date-prefixed directories: `2024-11-24-redis-experiment`
+1. Creates date-prefixed directories: `2024-11-24-order-daycare-lunch`
 2. Fuzzy search with smart scoring (recency, word boundaries, proximity)
 3. Changes to selected directory and launches your AI agent
 4. Seeds new directories with instructions file
