@@ -31,3 +31,10 @@ The CLI outputs shell commands to stdout (e.g., `cd '/path' && claude`) which th
 ## Test Flag
 
 Tests use `-Dspec` flag which wraps the main execution block in `{% unless flag?(:spec) %}` to prevent running during tests.
+
+## Contributing
+
+All changes should be submitted via pull requests, not pushed directly to main. This enables:
+- Code review
+- CI checks before merge
+- Auto-generated release notes categorized by PR labels
