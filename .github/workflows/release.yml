@@ -15,7 +15,7 @@ jobs:
     container:
       image: crystallang/crystal:1.18.2-alpine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: shards install --production
@@ -41,7 +41,7 @@ jobs:
     name: Build macOS (arm64)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: crystal-lang/install-crystal@v1
         with:
@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
