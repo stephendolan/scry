@@ -395,10 +395,10 @@ class ScrySelector
     setup_terminal
 
     if @interactive
+      RawMode.enable
       Signal::WINCH.trap { UI.refresh_size }
       Signal::INT.trap { RawMode.force_restore; exit(130) }
       Signal::TERM.trap { RawMode.force_restore; exit(143) }
-      RawMode.enable
     end
 
     main_loop
@@ -937,7 +937,8 @@ end
       File.write(instructions_path, generate_readme(name))
     end
 
-    File.touch(path)
-    puts "cd '#{path}' && #{config.effective_agent}"
+    escaped_path = path.gsub("'", "'\\''")
+    puts "cd '#{escaped_path}' && #{config.effective_agent}"
+    File.touch(path) rescue nil
   end
 {% end %}
