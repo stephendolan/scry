@@ -847,10 +847,13 @@ def print_help(config : Config)
   Usage:
     scry [QUERY]              Browse/create scries and launch agent
     scry init                 Print shell function for ~/.zshrc
+    scry cleanup [DAYS|DATE]  Delete old directories
 
   Examples:
     scry                      Browse all scries
     scry redis                Jump to matching scry
+    scry cleanup 30           Delete dirs older than 30 days
+    scry cleanup 2024-01-01   Delete dirs before that date
 
   Keys:
     Up/Down     Navigate
@@ -893,6 +896,136 @@ def print_init_script
   SHELL
 end
 
+def parse_cleanup_arg(arg : String?) : Time?
+  return nil unless arg
+
+  if days = arg.to_i?
+    return nil if days <= 0
+    Time.utc - days.days
+  elsif arg.matches?(/^\d{4}-\d{2}-\d{2}$/)
+    Time.parse(arg, "%Y-%m-%d", Time::Location::UTC)
+  else
+    nil
+  end
+rescue
+  nil
+end
+
+def prompt_for_cutoff : Time?
+  STDERR.print "Delete directories older than (days or YYYY-MM-DD): "
+  input = STDIN.gets.try(&.chomp)
+  return nil if input.nil? || input.empty?
+  parse_cleanup_arg(input)
+end
+
+def find_old_directories(base_path : String, cutoff : Time) : Array(String)
+  old_dirs = [] of String
+
+  Dir.each_child(base_path) do |entry|
+    next if entry.starts_with?('.')
+    path = File.join(base_path, entry)
+    next unless File.directory?(path)
+
+    info = File.info(path)
+    last_activity = {info.modification_time, File.info(path, follow_symlinks: false).modification_time}.max
+    old_dirs << path if last_activity < cutoff
+  end
+
+  old_dirs.sort_by { |dir| File.info(dir).modification_time }
+end
+
+def calculate_total_size(dirs : Array(String)) : String
+  return "0B" if dirs.empty?
+
+  output = IO::Memory.new
+  Process.run("du", ["-sh"] + dirs, output: output, error: Process::Redirect::Close)
+  lines = output.to_s.lines
+  return "???" if lines.empty?
+
+  if lines.size == 1
+    lines.first.split(/\s+/).first? || "???"
+  else
+    last_line = lines.last
+    last_line.split(/\s+/).first? || "???"
+  end
+rescue
+  "???"
+end
+
+def display_cleanup_preview(dirs : Array(String), cutoff : Time, total_size : String)
+  STDERR.puts "Found #{dirs.size} director#{dirs.size == 1 ? "y" : "ies"} older than #{cutoff.to_s("%Y-%m-%d")}:"
+  STDERR.puts
+
+  dirs.each do |path|
+    name = File.basename(path)
+    info = File.info(path)
+    age = Scoring.format_relative_time((Time.utc - info.modification_time).total_seconds)
+    STDERR.puts "  #{name}  (#{age})"
+  end
+
+  STDERR.puts
+  STDERR.puts "Total size: #{total_size}"
+  STDERR.puts
+end
+
+def delete_directories(dirs : Array(String))
+  deleted = 0
+  errors = 0
+
+  dirs.each do |path|
+    begin
+      FileUtils.rm_rf(path)
+      deleted += 1
+    rescue
+      errors += 1
+    end
+  end
+
+  STDERR.puts "Deleted #{deleted} director#{deleted == 1 ? "y" : "ies"}"
+  STDERR.puts "#{errors} error(s) occurred" if errors > 0
+end
+
+def run_cleanup(config : Config, arg : String?)
+  base_path = config.effective_path
+
+  unless Dir.exists?(base_path)
+    STDERR.puts "Scry directory does not exist: #{base_path}"
+    return
+  end
+
+  cutoff = parse_cleanup_arg(arg)
+  if cutoff.nil? && arg
+    STDERR.puts "Invalid input: #{arg}"
+    STDERR.puts "Use a number of days (e.g., 30) or a date (e.g., 2024-01-01)"
+    return
+  end
+
+  cutoff ||= prompt_for_cutoff
+  if cutoff.nil?
+    STDERR.puts "Invalid input. Use a number of days (e.g., 30) or a date (e.g., 2024-01-01)"
+    return
+  end
+
+  old_dirs = find_old_directories(base_path, cutoff)
+
+  if old_dirs.empty?
+    STDERR.puts "No directories found older than #{cutoff.to_s("%Y-%m-%d")}"
+    return
+  end
+
+  total_size = calculate_total_size(old_dirs)
+  display_cleanup_preview(old_dirs, cutoff, total_size)
+
+  STDERR.print "Type YES to delete: "
+  confirmation = STDIN.gets.try(&.chomp)
+
+  if confirmation == "YES"
+    delete_directories(old_dirs)
+  else
+    STDERR.puts "Cleanup cancelled"
+  end
+end
+
 {% unless flag?(:spec) %}
   config = Config.load
 
@@ -911,12 +1044,16 @@ end
     exit 0
   end
 
-  search_term = if ARGV.first? == "cd"
-                  ARGV.shift
-                  ARGV.join(" ")
-                else
-                  ARGV.join(" ")
-                end
+  # Strip "cd" prefix added by shell function wrapper
+  ARGV.shift if ARGV.first? == "cd"
+
+  if ARGV.first? == "cleanup"
+    ARGV.shift
+    run_cleanup(config, ARGV.first?)
+    exit 0
+  end
+
+  search_term = ARGV.join(" ")
 
   selector = ScrySelector.new(search_term, base_path: config.effective_path)
 
