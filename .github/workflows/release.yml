@@ -32,7 +32,7 @@ jobs:
           tar -czvf dist/scry-linux-x86_64.tar.gz -C bin scry
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: scry-linux-x86_64
           path: dist/scry-linux-x86_64.tar.gz
@@ -62,7 +62,7 @@ jobs:
           tar -czvf dist/scry-macos-arm64.tar.gz -C bin scry
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: scry-macos-arm64
           path: dist/scry-macos-arm64.tar.gz
