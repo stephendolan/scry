@@ -412,8 +412,13 @@ class ScrySelector
   private def enable_blocking_io
     # Crystal 1.16+ on macOS throws "kevent: Invalid argument" when the event loop
     # tries to register STDIN/STDERR in raw mode. Using blocking I/O bypasses the event loop.
-    STDIN.blocking = true
-    STDERR.blocking = true
+    {% if compare_versions(Crystal::VERSION, "1.18.0") >= 0 %}
+      IO::FileDescriptor.set_blocking(STDIN.fd, true)
+      IO::FileDescriptor.set_blocking(STDERR.fd, true)
+    {% else %}
+      STDIN.blocking = true
+      STDERR.blocking = true
+    {% end %}
   end
 
   private def setup_terminal
