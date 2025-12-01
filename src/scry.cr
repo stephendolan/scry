@@ -839,12 +839,6 @@ def print_help(config : Config)
     scry cleanup 30           Delete dirs older than 30 days
     scry cleanup 2024-01-01   Delete dirs before that date
 
-  Keys:
-    Up/Down     Navigate
-    Enter       Select/Create
-    Ctrl-D      Delete
-    ESC         Cancel
-
   Current config:
     Path:         #{config.effective_path}
     Agent:        #{config.effective_agent}
@@ -852,7 +846,7 @@ def print_help(config : Config)
 
   Environment (overrides config file):
     SCRY_PATH          Where scries are stored
-    SCRY_AGENT         Command to run after cd (e.g., claude, codex, aider)
+    SCRY_AGENT         Command to run after cd
     SCRY_INSTRUCTIONS  Markdown file to create in new directories
 
   Config file: ~/.config/scry/config.json
@@ -871,6 +865,12 @@ def print_init_script
 
   puts <<-SHELL
   scry() {
+    case "$1" in
+      --help|-h|--version|-v|init)
+        "#{script_path}" "$@"
+        return
+        ;;
+    esac
     result=$("#{script_path}" cd "$@" 2>/dev/tty)
     rc=$?
     if [ $rc -eq 0 ] && [ -n "$result" ]; then
