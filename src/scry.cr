@@ -47,6 +47,9 @@ struct Config
 end
 
 module RawMode
+  VMIN  = 16
+  VTIME = 17
+
   @@original : LibC::Termios?
   @@raw_mode = false
 
@@ -71,8 +74,8 @@ module RawMode
   private def self.apply_raw_mode(original : LibC::Termios) : Bool
     raw = original
     raw.c_lflag &= ~(LibC::ICANON | LibC::ECHO)
-    raw.c_cc[16] = 1_u8
-    raw.c_cc[17] = 0_u8
+    raw.c_cc[VMIN] = 1_u8
+    raw.c_cc[VTIME] = 0_u8
 
     LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(raw)) == 0
   end
@@ -229,16 +232,21 @@ module UI
   end
 
   private def self.read_escape_sequence : String
-    STDIN.read_timeout = 0.05.seconds
-    begin
-      extra = Bytes.new(5)
-      bytes_read = STDIN.read(extra)
-      bytes_read > 0 ? String.new(extra[0, bytes_read]) : ""
-    rescue IO::TimeoutError
-      ""
-    ensure
-      STDIN.read_timeout = nil
-    end
+    current = uninitialized LibC::Termios
+    return "" unless LibC.tcgetattr(STDIN.fd, pointerof(current)) == 0
+
+    timed = current
+    timed.c_cc[RawMode::VMIN] = 0_u8
+    timed.c_cc[RawMode::VTIME] = 1_u8
+    return "" unless LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(timed)) == 0
+
+    extra = Bytes.new(5)
+    bytes_read = LibC.read(STDIN.fd, extra.to_unsafe, extra.size)
+    bytes_read = 0 if bytes_read < 0
+
+    LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(current))
+
+    bytes_read > 0 ? String.new(extra[0, bytes_read]) : ""
   end
 end
 
@@ -395,6 +403,7 @@ class ScrySelector
     setup_terminal
 
     if @interactive
+      enable_blocking_io
       RawMode.enable
       Signal::WINCH.trap { UI.refresh_size }
       Signal::INT.trap { RawMode.force_restore; exit(130) }
@@ -407,6 +416,13 @@ class ScrySelector
       restore_terminal
       RawMode.disable
     end
+  end
+
+  private def enable_blocking_io
+    # Crystal 1.16+ on macOS throws "kevent: Invalid argument" when the event loop
+    # tries to register STDIN/STDERR in raw mode. Using blocking I/O bypasses the event loop.
+    STDIN.blocking = true
+    STDERR.blocking = true
   end
 
   private def setup_terminal
