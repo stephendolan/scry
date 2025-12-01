@@ -818,10 +818,11 @@ class ScrySelector
 end
 
 def generate_readme(name : String) : String
+  prompt = name.gsub("-", " ")
   <<-README
   # #{name}
 
-  Temporary directory created by scry for AI-assisted development.
+  Exploratory project created from prompt: "#{prompt}"
   README
 end
 
