@@ -37,7 +37,7 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     container:
-      image: crystallang/crystal:${{ env.CRYSTAL_VERSION }}-alpine
+      image: crystallang/crystal:1.18.2-alpine
     steps:
       - uses: actions/checkout@v4
       - run: shards install --production
