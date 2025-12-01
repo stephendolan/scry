@@ -24,9 +24,9 @@ struct Config
   end
 
   def initialize
-    @path = ENV["SCRY_PATH"]? || "~/scries"
-    @agent = ENV["SCRY_AGENT"]? || "claude"
-    @instructions = ENV["SCRY_INSTRUCTIONS"]? || "CLAUDE.md"
+    @path = "~/scries"
+    @agent = "claude"
+    @instructions = "CLAUDE.md"
   end
 
   def effective_path : String
@@ -213,6 +213,7 @@ module UI
   def self.refresh_size
     @@width = nil
     @@height = nil
+    @@last_buffer.clear
   end
 
   def self.read_key : String

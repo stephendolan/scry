@@ -2,21 +2,27 @@ require "./spec_helper"
 
 describe "parse_cleanup_arg" do
   it "parses positive days" do
-    result = parse_cleanup_arg("30")
-    result.should_not be_nil
-    result.not_nil!.should be_close(Time.utc - 30.days, 1.second)
+    if result = parse_cleanup_arg("30")
+      result.should be_close(Time.utc - 30.days, 1.second)
+    else
+      fail "Expected non-nil result"
+    end
   end
 
   it "parses single day" do
-    result = parse_cleanup_arg("1")
-    result.should_not be_nil
-    result.not_nil!.should be_close(Time.utc - 1.day, 1.second)
+    if result = parse_cleanup_arg("1")
+      result.should be_close(Time.utc - 1.day, 1.second)
+    else
+      fail "Expected non-nil result"
+    end
   end
 
   it "parses YYYY-MM-DD dates" do
-    result = parse_cleanup_arg("2024-01-15")
-    result.should_not be_nil
-    result.not_nil!.to_s("%Y-%m-%d").should eq("2024-01-15")
+    if result = parse_cleanup_arg("2024-01-15")
+      result.to_s("%Y-%m-%d").should eq("2024-01-15")
+    else
+      fail "Expected non-nil result"
+    end
   end
 
   it "returns nil for invalid input" do
