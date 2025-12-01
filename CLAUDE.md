@@ -1,40 +1,35 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Build & Development Commands
+## Commands
 
 ```bash
 shards install              # Install dependencies
-crystal spec -Dspec         # Run all tests
-crystal spec -Dspec spec/scoring_spec.cr  # Run single test file
-./bin/ameba                 # Run linter
+crystal spec -Dspec         # Run tests
+./bin/ameba                 # Lint
 crystal tool format --check # Check formatting
-crystal tool format         # Auto-format code
-shards build --release --no-debug  # Build release binary
+shards build --release --no-debug  # Build binary
 ```
 
 ## Architecture
 
-Single-file Crystal CLI (`src/scry.cr`) with these key components:
+Single-file Crystal CLI (`src/scry.cr`, ~1000 lines):
 
-- **Config**: JSON-serializable struct loading from `~/.config/scry/config.json` with env var overrides (`SCRY_PATH`, `SCRY_AGENT`, `SCRY_INSTRUCTIONS`)
-- **RawMode**: Terminal raw mode handling via LibC termios for keyboard input
-- **UI**: Buffered rendering system with ANSI token expansion (`{h1}`, `{highlight}`, etc.) and diff-based screen updates
-- **Scoring**: Fuzzy matching algorithm with word boundary bonuses, proximity scoring, and time decay for recency
-- **ScrySelector**: Main interactive TUI - directory listing, filtering, creation, deletion
+| Module | Purpose |
+|--------|---------|
+| Config | JSON config from `~/.config/scry/config.json`, env var overrides |
+| RawMode | Terminal raw mode via LibC termios |
+| UI | Buffered ANSI rendering with diff-based updates |
+| Scoring | Fuzzy matching with word boundaries, proximity, recency decay |
+| ScrySelector | Interactive TUI for directory selection |
 
-## Shell Integration
+## Key Patterns
 
-The CLI outputs shell commands to stdout (e.g., `cd '/path' && claude`) which the shell function from `scry init` evaluates. The TUI renders to stderr to keep stdout clean for command output.
+**Shell integration**: CLI outputs shell commands to stdout (`cd '/path' && claude`). TUI renders to stderr. The shell function from `scry init` evaluates stdout.
 
-## Test Flag
+**Test isolation**: Tests use `-Dspec` flag. Main block wrapped in `{% unless flag?(:spec) %}`.
 
-Tests use `-Dspec` flag which wraps the main execution block in `{% unless flag?(:spec) %}` to prevent running during tests.
+## Workflow
 
-## Contributing
+Submit changes via pull request to enable CI checks and auto-generated release notes.
 
-All changes should be submitted via pull requests, not pushed directly to main. This enables:
-- Code review
-- CI checks before merge
-- Auto-generated release notes categorized by PR labels
+Bump version in `shard.yml` to trigger automatic tagging and release.
