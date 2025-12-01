@@ -19,7 +19,7 @@ jobs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - id: version
         run: |
           VERSION=$(grep '^version:' shard.yml | sed 's/version: *//')
@@ -39,7 +39,7 @@ jobs:
     container:
       image: crystallang/crystal:1.18.2-alpine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: shards install --production
       - run: |
           shards build scry --production --release --static --no-debug
@@ -55,7 +55,7 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: crystal-lang/install-crystal@v1
         with:
           crystal: ${{ env.CRYSTAL_VERSION }}
@@ -74,7 +74,7 @@ jobs:
     if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
