@@ -2,8 +2,9 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - shard.yml
 
 permissions:
   contents: write
@@ -12,7 +13,28 @@ env:
   CRYSTAL_VERSION: 1.18.2
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          VERSION=$(grep '^version:' shard.yml | sed 's/version: *//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      - id: check
+        run: |
+          if git ls-remote --tags origin | grep -q "refs/tags/v${{ steps.version.outputs.version }}$"; then
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
   build-linux:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     container:
       image: crystallang/crystal:${{ env.CRYSTAL_VERSION }}-alpine
@@ -29,6 +51,8 @@ jobs:
           path: scry-linux-x86_64.tar.gz
 
   build-macos-arm:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -46,10 +70,16 @@ jobs:
           path: scry-macos-arm64.tar.gz
 
   release:
-    needs: [build-linux, build-macos-arm]
+    needs: [check-version, build-linux, build-macos-arm]
+    if: needs.check-version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ needs.check-version.outputs.version }}" -m "Release v${{ needs.check-version.outputs.version }}"
+          git push origin "v${{ needs.check-version.outputs.version }}"
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -59,5 +89,6 @@ jobs:
           sha256sum *.tar.gz > checksums.txt
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ needs.check-version.outputs.version }}
           files: dist/*
           generate_release_notes: true
