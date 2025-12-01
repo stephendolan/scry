@@ -226,8 +226,9 @@ module UI
 
   private def self.read_first_byte : String
     buf = Bytes.new(1)
-    STDIN.read(buf)
-    String.new(buf)
+    bytes_read = LibC.read(STDIN.fd, buf.to_unsafe, 1)
+    return "" if bytes_read <= 0
+    String.new(buf[0, bytes_read])
   end
 
   private def self.read_escape_sequence : String
