@@ -239,13 +239,14 @@ module UI
     timed.c_cc[RawMode::VTIME] = 1_u8
     return "" unless LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(timed)) == 0
 
-    extra = Bytes.new(5)
-    bytes_read = LibC.read(STDIN.fd, extra.to_unsafe, extra.size)
-    bytes_read = 0 if bytes_read < 0
-
-    LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(current))
-
-    bytes_read > 0 ? String.new(extra[0, bytes_read]) : ""
+    begin
+      extra = Bytes.new(5)
+      bytes_read = LibC.read(STDIN.fd, extra.to_unsafe, extra.size)
+      bytes_read = 0 if bytes_read < 0
+      bytes_read > 0 ? String.new(extra[0, bytes_read]) : ""
+    ensure
+      LibC.tcsetattr(STDIN.fd, LibC::TCSANOW, pointerof(current))
+    end
   end
 end
 
@@ -279,11 +280,10 @@ end
 struct ScryDir
   getter name : String
   getter path : String
-  getter ctime : Time
   getter mtime : Time
   property score : Float64
 
-  def initialize(@name, @path, @ctime, @mtime)
+  def initialize(@name, @path, @mtime)
     @score = 0.0
   end
 end
@@ -446,7 +446,6 @@ class ScrySelector
         scries << ScryDir.new(
           name: entry,
           path: path,
-          ctime: info.modification_time,
           mtime: info.modification_time
         )
       end
@@ -490,11 +489,8 @@ class ScrySelector
   end
 
   private def recency_score(scry : ScryDir) : Float64
-    now = Time.utc
-    days_old = (now - scry.ctime).total_seconds / 86400
-    hours_since_access = (now - scry.mtime).total_seconds / 3600
-
-    Scoring.time_decay(days_old, 2.0) + Scoring.time_decay(hours_since_access, 3.0)
+    hours_since_modified = (Time.utc - scry.mtime).total_seconds / 3600
+    Scoring.time_decay(hours_since_modified, 5.0)
   end
 
   private def main_loop
