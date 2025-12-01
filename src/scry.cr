@@ -147,10 +147,9 @@ module UI
   end
 
   private def self.complete_current_line
-    unless @@current_line.empty?
-      @@buffer << @@current_line
-      @@current_line = ""
-    end
+    return if @@current_line.empty?
+    @@buffer << @@current_line
+    @@current_line = ""
   end
 
   private def self.flush_non_tty(io)
@@ -166,7 +165,6 @@ module UI
     io.print("\e[H")
 
     max_lines = {@@buffer.size, @@last_buffer.size}.max
-    reset = TOKENS["{reset}"]
 
     (0...max_lines).each do |i|
       current_line = @@buffer[i]? || ""
@@ -176,7 +174,7 @@ module UI
         io.print("\e[#{i + 1};1H\e[2K")
         unless current_line.empty?
           io.print(expand_tokens(current_line))
-          io.print(reset)
+          io.print(TOKENS["{reset}"])
         end
       end
     end
@@ -378,9 +376,9 @@ class ScrySelector
   @interactive : Bool
 
   def initialize(search_term = "", base_path : String = "", keyboard : KeyboardInput? = nil, output : IO? = nil, interactive : Bool = true)
-    @search_term = normalize_search_term(search_term)
+    @search_term = search_term.gsub(/\s+/, "-")
     @input_buffer = @search_term
-    @base_path = resolve_base_path(base_path)
+    @base_path = base_path.empty? ? File.expand_path("~/scries") : base_path
     @selected = nil
     @keyboard = keyboard || StandardKeyboard.new
     @output = output || STDERR
@@ -391,14 +389,6 @@ class ScrySelector
 
   getter cursor_pos : Int32
   getter input_buffer : String
-
-  private def normalize_search_term(term : String) : String
-    term.gsub(/\s+/, "-")
-  end
-
-  private def resolve_base_path(path : String) : String
-    path.empty? ? File.expand_path("~/scries") : path
-  end
 
   def run : NamedTuple(type: Symbol, path: String)?
     setup_terminal
@@ -442,30 +432,22 @@ class ScrySelector
       scries = [] of ScryDir
 
       Dir.each_child(@base_path) do |entry|
-        next if hidden?(entry)
+        next if entry.starts_with?('.')
 
         path = File.join(@base_path, entry)
         next unless File.directory?(path)
 
-        scries << create_scry_dir(entry, path)
+        info = File.info(path)
+        scries << ScryDir.new(
+          name: entry,
+          path: path,
+          ctime: info.modification_time,
+          mtime: info.modification_time
+        )
       end
 
       scries
     end
-  end
-
-  private def hidden?(entry : String) : Bool
-    entry.starts_with?('.')
-  end
-
-  private def create_scry_dir(entry : String, path : String) : ScryDir
-    info = File.info(path)
-    ScryDir.new(
-      name: entry,
-      path: path,
-      ctime: info.modification_time,
-      mtime: info.modification_time
-    )
   end
 
   private def get_scries : Array(ScryDir)
@@ -496,14 +478,10 @@ class ScrySelector
 
   private def calculate_score(scry : ScryDir, query : String, fuzzy_score : Float64 = 0.0) : Float64
     score = 0.0
-    score += 2.0 if date_prefixed?(scry.name)
+    score += 2.0 if scry.name.matches?(/^\d{4}-\d{2}-\d{2}-/)
     score += fuzzy_score > 0 ? fuzzy_score : Scoring.fuzzy_match(scry.name, query)
     score += recency_score(scry)
     score
-  end
-
-  private def date_prefixed?(name : String) : Bool
-    name.matches?(/^\d{4}-\d{2}-\d{2}-/)
   end
 
   private def recency_score(scry : ScryDir) : Float64
@@ -570,7 +548,8 @@ class ScrySelector
   end
 
   private def handle_backspace
-    @input_buffer = @input_buffer[0...-1] if @input_buffer.size > 0
+    return if @input_buffer.empty?
+    @input_buffer = @input_buffer[0...-1]
     @cursor_pos = 0
   end
 
@@ -631,8 +610,7 @@ class ScrySelector
   end
 
   private def render_scroll_indicator(total_items : Int32, max_visible : Int32, visible_end : Int32, separator : String)
-    return unless total_items > max_visible
-
+    return if total_items <= max_visible
     UI.puts "{dim_text}#{separator}"
     UI.puts "{dim_text}[#{@scroll_offset + 1}-#{visible_end}/#{total_items}]"
   end
@@ -652,7 +630,7 @@ class ScrySelector
 
     display_text = render_scry_name(scry)
 
-    time_text = format_relative_time(scry.mtime)
+    time_text = Scoring.format_relative_time((Time.utc - scry.mtime).total_seconds)
     score_text = sprintf("%.1f", scry.score)
     meta_text = "#{time_text}, #{score_text}"
 
@@ -722,10 +700,6 @@ class ScrySelector
     end
   end
 
-  private def format_relative_time(time : Time) : String
-    Scoring.format_relative_time((Time.utc - time).total_seconds)
-  end
-
   private def highlight_matches(text : String, query : String, is_selected : Bool) : String
     return text if query.empty?
 
@@ -757,58 +731,50 @@ class ScrySelector
     if @input_buffer.empty?
       prompt_for_name
     else
-      create_with_buffer_name
+      date_prefix = Time.local.to_s("%Y-%m-%d")
+      final_name = "#{date_prefix}-#{@input_buffer}".gsub(/\s+/, "-")
+      full_path = File.join(@base_path, final_name)
+      @selected = {type: :mkdir, path: full_path}
     end
-  end
-
-  private def create_with_buffer_name
-    date_prefix = Time.local.to_s("%Y-%m-%d")
-    final_name = "#{date_prefix}-#{@input_buffer}".gsub(/\s+/, "-")
-    full_path = File.join(@base_path, final_name)
-    @selected = {type: :mkdir, path: full_path}
   end
 
   private def prompt_for_name
     date_prefix = Time.local.to_s("%Y-%m-%d")
 
-    begin
-      RawMode.disable
-      UI.cls
-      STDERR.puts "Enter new scry name:"
-      STDERR.print "> #{date_prefix}-"
-      STDERR.print("\e[?25h")
+    RawMode.disable
+    UI.cls
+    STDERR.puts "Enter new scry name:"
+    STDERR.print "> #{date_prefix}-"
+    STDERR.print("\e[?25h")
 
-      entry = STDIN.gets.try(&.chomp) || ""
-      return @selected = nil if entry.empty?
+    entry = STDIN.gets.try(&.chomp) || ""
+    return @selected = nil if entry.empty?
 
-      final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
-      full_path = File.join(@base_path, final_name)
-      @selected = {type: :mkdir, path: full_path}
-    ensure
-      RawMode.enable
-    end
+    final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
+    full_path = File.join(@base_path, final_name)
+    @selected = {type: :mkdir, path: full_path}
+  ensure
+    RawMode.enable
   end
 
   private def handle_delete(scry : ScryDir)
     size = get_directory_size(scry.path)
     files = count_files(scry.path)
 
-    begin
-      RawMode.disable
-      UI.cls
+    RawMode.disable
+    UI.cls
 
-      display_delete_prompt(scry, files, size)
-      confirmation = STDIN.gets.try(&.chomp) || ""
+    display_delete_prompt(scry, files, size)
+    confirmation = STDIN.gets.try(&.chomp) || ""
 
-      if confirmation == "YES"
-        delete_directory(scry)
-      else
-        @delete_status = "Delete cancelled"
-      end
-    ensure
-      STDERR.print("\e[?25l")
-      RawMode.enable
+    if confirmation == "YES"
+      delete_directory(scry)
+    else
+      @delete_status = "Delete cancelled"
     end
+  ensure
+    STDERR.print("\e[?25l")
+    RawMode.enable
   end
 
   private def get_directory_size(path : String) : String
@@ -931,7 +897,7 @@ end
 def prompt_for_cutoff : Time?
   STDERR.print "Delete directories older than (days or YYYY-MM-DD): "
   input = STDIN.gets.try(&.chomp)
-  return nil if input.nil? || input.empty?
+  return nil if !input || input.empty?
   parse_cleanup_arg(input)
 end
 
@@ -959,12 +925,8 @@ def calculate_total_size(dirs : Array(String)) : String
   lines = output.to_s.lines
   return "???" if lines.empty?
 
-  if lines.size == 1
-    lines.first.split(/\s+/).first? || "???"
-  else
-    last_line = lines.last
-    last_line.split(/\s+/).first? || "???"
-  end
+  target_line = lines.size == 1 ? lines.first : lines.last
+  target_line.split(/\s+/).first? || "???"
 rescue
   "???"
 end
