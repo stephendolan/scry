@@ -45,7 +45,7 @@ jobs:
           shards build scry --production --release --static --no-debug
           strip bin/scry
       - run: tar -czvf scry-linux-x86_64.tar.gz -C bin scry
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: scry-linux-x86_64
           path: scry-linux-x86_64.tar.gz
@@ -64,7 +64,7 @@ jobs:
           shards build scry --production --release --no-debug
           strip bin/scry
       - run: tar -czvf scry-macos-arm64.tar.gz -C bin scry
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: scry-macos-arm64
           path: scry-macos-arm64.tar.gz
