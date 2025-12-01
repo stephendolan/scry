@@ -8,90 +8,56 @@ on:
 permissions:
   contents: write
 
+env:
+  CRYSTAL_VERSION: 1.18.2
+
 jobs:
   build-linux:
-    name: Build Linux (x86_64)
     runs-on: ubuntu-latest
     container:
-      image: crystallang/crystal:1.18.2-alpine
+      image: crystallang/crystal:${{ env.CRYSTAL_VERSION }}-alpine
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: shards install --production
-
-      - name: Build static binary
-        run: |
+      - run: shards install --production
+      - run: |
           shards build scry --production --release --static --no-debug
           strip bin/scry
-          chmod +x bin/scry
-
-      - name: Package
-        run: |
-          mkdir -p dist
-          tar -czvf dist/scry-linux-x86_64.tar.gz -C bin scry
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - run: tar -czvf scry-linux-x86_64.tar.gz -C bin scry
+      - uses: actions/upload-artifact@v4
         with:
           name: scry-linux-x86_64
-          path: dist/scry-linux-x86_64.tar.gz
+          path: scry-linux-x86_64.tar.gz
 
   build-macos-arm:
-    name: Build macOS (arm64)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.18.2
-
-      - name: Install dependencies
-        run: shards install --production
-
-      - name: Build binary
-        run: |
+          crystal: ${{ env.CRYSTAL_VERSION }}
+      - run: shards install --production
+      - run: |
           shards build scry --production --release --no-debug
           strip bin/scry
-          chmod +x bin/scry
-
-      - name: Package
-        run: |
-          mkdir -p dist
-          tar -czvf dist/scry-macos-arm64.tar.gz -C bin scry
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - run: tar -czvf scry-macos-arm64.tar.gz -C bin scry
+      - uses: actions/upload-artifact@v4
         with:
           name: scry-macos-arm64
-          path: dist/scry-macos-arm64.tar.gz
+          path: scry-macos-arm64.tar.gz
 
   release:
-    name: Create Release
     needs: [build-linux, build-macos-arm]
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-
-      - name: Generate checksums
-        run: |
+      - run: |
           cd dist
           sha256sum *.tar.gz > checksums.txt
-          cat checksums.txt
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*.tar.gz
-            dist/checksums.txt
+          files: dist/*
           generate_release_notes: true
