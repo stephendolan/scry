@@ -1,7 +1,8 @@
 require "file_utils"
 require "json"
 
-VERSION = {{ `shards version`.stringify.chomp }}
+VERSION        = {{ `shards version`.stringify.chomp }}
+TEMPLATES_PATH = "~/.config/scry/templates"
 
 struct Config
   include JSON::Serializable
@@ -826,6 +827,32 @@ def generate_readme(name : String) : String
   README
 end
 
+def templates_base_path : String
+  File.expand_path(TEMPLATES_PATH, home: Path.home)
+end
+
+def list_templates : Array(String)
+  base = templates_base_path
+  return [] of String unless Dir.exists?(base)
+  Dir.children(base).select { |name| Dir.exists?(File.join(base, name)) }.sort!
+end
+
+def apply_template(template_dir : String, target_dir : String) : Nil
+  Dir.glob(File.join(template_dir, "**", "*"), match: File::MatchOptions::DotFiles).each do |src|
+    relative = src.sub(template_dir + "/", "")
+    next if relative.starts_with?(".git")
+
+    dest = File.join(target_dir, relative)
+
+    if File.directory?(src)
+      FileUtils.mkdir_p(dest)
+    else
+      FileUtils.mkdir_p(File.dirname(dest))
+      FileUtils.cp(src, dest)
+    end
+  end
+end
+
 def print_help(config : Config)
   help = <<-HELP
   Scry - temporary directories for AI coding agents
@@ -834,12 +861,22 @@ def print_help(config : Config)
     scry [QUERY]              Browse/create scries and launch agent
     scry init                 Print shell function for ~/.zshrc
     scry cleanup [DAYS|DATE]  Delete old directories
+    scry templates            List available templates
+
+  Options:
+    --template NAME           Apply template when creating new scry
 
   Examples:
     scry                      Browse all scries
     scry redis                Jump to matching scry
     scry cleanup 30           Delete dirs older than 30 days
     scry cleanup 2024-01-01   Delete dirs before that date
+    scry --template security "ACME SOC2"
+                              Create scry with security template
+
+  Templates:
+    Templates are directories in #{templates_base_path}
+    Each template directory is copied into new scries.
 
   Current config:
     Path:         #{config.effective_path}
@@ -868,7 +905,7 @@ def print_init_script
   puts <<-SHELL
   scry() {
     case "$1" in
-      --help|-h|--version|-v|init)
+      --help|-h|--version|-v|init|templates)
         "#{script_path}" "$@"
         return
         ;;
@@ -1026,16 +1063,33 @@ end
     exit 0
   end
 
-  # Strip "cd" prefix added by shell function wrapper
-  ARGV.shift if ARGV.first? == "cd"
-
-  if ARGV.first? == "cleanup"
-    ARGV.shift
-    run_cleanup(config, ARGV.first?)
+  if ARGV.first? == "templates"
+    templates = list_templates
+    if templates.empty?
+      STDERR.puts "No templates found in #{templates_base_path}"
+      STDERR.puts "Create a template by adding a directory there."
+    else
+      templates.each { |t| puts t }
+    end
     exit 0
   end
 
-  search_term = ARGV.join(" ")
+  args = ARGV.to_a
+  template_name : String? = nil
+  if idx = args.index("--template")
+    args.delete_at(idx)
+    template_name = args.delete_at(idx) if idx < args.size
+  end
+
+  args.shift if args.first? == "cd"
+
+  if args.first? == "cleanup"
+    args.shift
+    run_cleanup(config, args.first?)
+    exit 0
+  end
+
+  search_term = args.join(" ")
 
   selector = ScrySelector.new(search_term, base_path: config.effective_path)
 
@@ -1054,6 +1108,17 @@ end
       instructions_path = File.join(path, config.effective_instructions)
       name = File.basename(path).sub(/^\d{4}-\d{2}-\d{2}-/, "")
       File.write(instructions_path, generate_readme(name))
+
+      if tpl = template_name
+        tpl_dir = File.join(templates_base_path, tpl)
+        unless Dir.exists?(tpl_dir)
+          STDERR.puts "Template '#{tpl}' not found."
+          available = list_templates
+          STDERR.puts "Available templates: #{available.join(", ")}" if available.any?
+          exit 1
+        end
+        apply_template(tpl_dir, path)
+      end
     end
 
     escaped_path = path.gsub("'", "'\\''")
