@@ -11,10 +11,6 @@ Download the latest binary from [Releases](https://github.com/stephendolan/scry/
 curl -L https://github.com/stephendolan/scry/releases/latest/download/scry-macos-arm64.tar.gz | tar xz
 sudo mv scry /usr/local/bin/
 
-# macOS (Intel)
-curl -L https://github.com/stephendolan/scry/releases/latest/download/scry-macos-x86_64.tar.gz | tar xz
-sudo mv scry /usr/local/bin/
-
 # Linux
 curl -L https://github.com/stephendolan/scry/releases/latest/download/scry-linux-x86_64.tar.gz | tar xz
 sudo mv scry /usr/local/bin/
