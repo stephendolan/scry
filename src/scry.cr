@@ -818,15 +818,6 @@ class ScrySelector
   end
 end
 
-def generate_readme(name : String) : String
-  prompt = name.gsub("-", " ")
-  <<-README
-  # #{name}
-
-  Exploratory project created from prompt: "#{prompt}"
-  README
-end
-
 def templates_base_path : String
   File.expand_path(TEMPLATES_PATH, home: Path.home)
 end
@@ -876,7 +867,7 @@ def print_help(config : Config)
 
   Templates:
     Templates are directories in #{templates_base_path}
-    Each template directory is copied into new scries.
+    The "default" template is applied automatically (if it exists).
 
   Current config:
     Path:         #{config.effective_path}
@@ -1105,11 +1096,10 @@ end
 
     if result[:type] == :mkdir
       FileUtils.mkdir_p(path)
-      instructions_path = File.join(path, config.effective_instructions)
-      name = File.basename(path).sub(/^\d{4}-\d{2}-\d{2}-/, "")
-      File.write(instructions_path, generate_readme(name))
 
-      if tpl = template_name
+      tpl = template_name || ("default" if Dir.exists?(File.join(templates_base_path, "default")))
+
+      if tpl
         tpl_dir = File.join(templates_base_path, tpl)
         unless Dir.exists?(tpl_dir)
           STDERR.puts "Template '#{tpl}' not found."
