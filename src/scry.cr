@@ -9,7 +9,6 @@ struct Config
 
   getter path : String = "~/scries"
   getter agent : String = "claude"
-  getter instructions : String = "CLAUDE.md"
 
   def self.load : Config
     config_path = File.expand_path("~/.config/scry/config.json", home: Path.home)
@@ -27,7 +26,6 @@ struct Config
   def initialize
     @path = "~/scries"
     @agent = "claude"
-    @instructions = "CLAUDE.md"
   end
 
   def effective_path : String
@@ -36,10 +34,6 @@ struct Config
 
   def effective_agent : String
     ENV["SCRY_AGENT"]? || @agent
-  end
-
-  def effective_instructions : String
-    ENV["SCRY_INSTRUCTIONS"]? || @instructions
   end
 
   private def expand_home_path(path : String) : String
@@ -870,20 +864,17 @@ def print_help(config : Config)
     The "default" template is applied automatically (if it exists).
 
   Current config:
-    Path:         #{config.effective_path}
-    Agent:        #{config.effective_agent}
-    Instructions: #{config.effective_instructions}
+    Path:  #{config.effective_path}
+    Agent: #{config.effective_agent}
 
   Environment (overrides config file):
-    SCRY_PATH          Where scries are stored
-    SCRY_AGENT         Command to run after cd
-    SCRY_INSTRUCTIONS  Markdown file to create in new directories
+    SCRY_PATH   Where scries are stored
+    SCRY_AGENT  Command to run after cd
 
   Config file: ~/.config/scry/config.json
     {
       "path": "~/scries",
-      "agent": "claude",
-      "instructions": "CLAUDE.md"
+      "agent": "claude"
     }
 
   HELP

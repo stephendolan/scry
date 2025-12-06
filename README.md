@@ -70,17 +70,15 @@ Optional configuration via `~/.config/scry/config.json` or environment variables
 ```json
 {
   "path": "~/scries",
-  "agent": "claude",
-  "instructions": "CLAUDE.md"
+  "agent": "claude"
 }
 ```
 
 Environment variables override config file settings:
 
 ```bash
-export SCRY_PATH=~/experiments         # Custom directory location
-export SCRY_AGENT=aider                # Different AI agent command
-export SCRY_INSTRUCTIONS=INSTRUCTIONS.md  # Custom instructions filename
+export SCRY_PATH=~/experiments  # Custom directory location
+export SCRY_AGENT=opencode      # Different AI agent command
 ```
 
 ## License

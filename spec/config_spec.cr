@@ -11,11 +11,10 @@ describe Config do
 
   describe ".from_json" do
     it "parses custom config" do
-      json = %({ "path": "/custom/path", "agent": "aider", "instructions": "README.md" })
+      json = %({ "path": "/custom/path", "agent": "opencode" })
       config = Config.from_json(json)
       config.path.should eq("/custom/path")
-      config.agent.should eq("aider")
-      config.instructions.should eq("README.md")
+      config.agent.should eq("opencode")
     end
 
     it "uses defaults for missing fields" do
@@ -23,7 +22,6 @@ describe Config do
       config = Config.from_json(json)
       config.path.should eq("~/scries")
       config.agent.should eq("codex")
-      config.instructions.should eq("CLAUDE.md")
     end
   end
 end
