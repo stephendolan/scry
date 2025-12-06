@@ -249,6 +249,48 @@ describe ScrySelector do
 
       FileUtils.rm_rf(test_dir)
     end
+
+    it "sanitizes filesystem-unsafe characters in search term" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new("calendar -> Slack", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.input_buffer.should eq("calendar-Slack")
+
+      FileUtils.rm_rf(test_dir)
+    end
+
+    it "collapses multiple dashes from unsafe characters" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new("foo < > bar", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.input_buffer.should eq("foo-bar")
+
+      FileUtils.rm_rf(test_dir)
+    end
+
+    it "strips leading and trailing dashes" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new(">test<", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.input_buffer.should eq("test")
+
+      FileUtils.rm_rf(test_dir)
+    end
   end
 
   describe "creation" do

@@ -372,7 +372,7 @@ class ScrySelector
   @interactive : Bool
 
   def initialize(search_term = "", base_path : String = "", keyboard : KeyboardInput? = nil, output : IO? = nil, interactive : Bool = true)
-    @search_term = search_term.gsub(/\s+/, "-")
+    @search_term = sanitize_name(search_term)
     @input_buffer = @search_term
     @base_path = base_path.empty? ? File.expand_path("~/scries") : base_path
     @selected = nil
@@ -729,7 +729,7 @@ class ScrySelector
       prompt_for_name
     else
       date_prefix = Time.local.to_s("%Y-%m-%d")
-      final_name = "#{date_prefix}-#{@input_buffer}".gsub(/\s+/, "-")
+      final_name = "#{date_prefix}-#{sanitize_name(@input_buffer)}"
       full_path = File.join(@base_path, final_name)
       @selected = {type: :mkdir, path: full_path}
     end
@@ -747,7 +747,7 @@ class ScrySelector
     entry = STDIN.gets.try(&.chomp) || ""
     return @selected = nil if entry.empty?
 
-    final_name = "#{date_prefix}-#{entry}".gsub(/\s+/, "-")
+    final_name = "#{date_prefix}-#{sanitize_name(entry)}"
     full_path = File.join(@base_path, final_name)
     @selected = {type: :mkdir, path: full_path}
   ensure
@@ -809,6 +809,14 @@ class ScrySelector
     @all_scries = nil
   rescue ex
     @delete_status = "Error: #{ex.message}"
+  end
+
+  private def sanitize_name(name : String) : String
+    name
+      .gsub(/[<>:"|?*\/\\]/, "-")
+      .gsub(/\s+/, "-")
+      .gsub(/-+/, "-")
+      .strip("-")
   end
 end
 
