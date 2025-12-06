@@ -39,11 +39,33 @@ scry metrics              # Jump to matching directory or filter
 scry order-daycare-lunch  # Create new directory if no match
 ```
 
-**Navigation**: `↑`/`↓` to move, `Enter` to select, `Ctrl-D` to delete, `ESC` to exit, type to filter
+**Navigation**: `↑`/`↓` move, `Enter` select, `Ctrl-D` delete, `ESC` exit, type to filter
+
+## Templates
+
+Bootstrap new scry directories with predefined files.
+
+**Setup**: Create template directories in `~/.config/scry/templates/`:
+
+```bash
+mkdir -p ~/.config/scry/templates/default
+echo "# Instructions for Claude" > ~/.config/scry/templates/default/CLAUDE.md
+echo "*.log" > ~/.config/scry/templates/default/.gitignore
+```
+
+**Usage**:
+
+```bash
+scry templates                          # List available templates
+scry "ACME audit"                       # Creates directory with default template
+scry "security-review" --template audit # Apply audit template instead
+```
+
+The `default` template is applied automatically when creating new directories. All files from the template directory are copied to the new scry directory.
 
 ## Configuration
 
-Optional. Create `~/.config/scry/config.json` or use environment variables:
+Optional configuration via `~/.config/scry/config.json` or environment variables:
 
 ```json
 {
@@ -53,9 +75,12 @@ Optional. Create `~/.config/scry/config.json` or use environment variables:
 }
 ```
 
+Environment variables override config file settings:
+
 ```bash
-export SCRY_AGENT=aider        # Use different AI agent
-export SCRY_PATH=~/experiments # Custom storage location
+export SCRY_PATH=~/experiments         # Custom directory location
+export SCRY_AGENT=aider                # Different AI agent command
+export SCRY_INSTRUCTIONS=INSTRUCTIONS.md  # Custom instructions filename
 ```
 
 ## License
