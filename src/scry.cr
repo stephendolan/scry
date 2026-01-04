@@ -895,7 +895,7 @@ def print_init_script
   puts <<-SHELL
   scry() {
     case "$1" in
-      --help|-h|--version|-v|init|templates)
+      --help|-h|--version|-v|init|templates|cleanup)
         "#{script_path}" "$@"
         return
         ;;
