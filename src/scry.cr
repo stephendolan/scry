@@ -461,8 +461,7 @@ class ScrySelector
   end
 
   private def score_all_scries(scries : Array(ScryDir)) : Array(ScryDir)
-    scries.each { |scry| scry.score = calculate_score(scry, "") }
-    scries.sort_by { |scry| -scry.score }
+    scries.sort_by { |scry| -scry.mtime.to_unix }
   end
 
   private def filter_and_score_scries(scries : Array(ScryDir)) : Array(ScryDir)
