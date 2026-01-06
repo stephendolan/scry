@@ -39,7 +39,12 @@ scry metrics              # Jump to matching directory or filter
 scry order-daycare-lunch  # Create new directory if no match
 ```
 
-**Navigation**: `↑`/`↓` move, `Enter` select, `Ctrl-D` delete, `ESC` exit, type to filter
+**Navigation**:
+- `↑`/`↓` or `Ctrl-K`/`Ctrl-J` or `Ctrl-P`/`Ctrl-N` - Move cursor
+- `Enter` - Select directory or create new
+- `Ctrl-D` - Delete selected directory
+- `ESC`/`Ctrl-C` - Exit
+- Type to filter (fuzzy matching)
 
 ## Templates
 
@@ -62,6 +67,18 @@ scry "security-review" --template audit # Apply audit template instead
 ```
 
 The `default` template is applied automatically when creating new directories. All files from the template directory are copied to the new scry directory.
+
+## Cleanup
+
+Remove old directories by age or date:
+
+```bash
+scry cleanup 30              # Delete directories older than 30 days
+scry cleanup 2024-01-01      # Delete directories before this date
+scry cleanup                 # Interactive prompt
+```
+
+Shows preview with directory names, age, size, and file count before deletion.
 
 ## Configuration
 
