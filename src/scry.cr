@@ -370,6 +370,7 @@ class ScrySelector
   @keyboard : KeyboardInput
   @output : IO
   @interactive : Bool
+  @recalculate_cursor : Bool = true
 
   def initialize(search_term = "", base_path : String = "", keyboard : KeyboardInput? = nil, output : IO? = nil, interactive : Bool = true)
     @search_term = sanitize_name(search_term)
@@ -488,11 +489,32 @@ class ScrySelector
     Scoring.time_decay(hours_since_modified, 5.0)
   end
 
+  private def extract_suffix(name : String) : String
+    if match = name.match(/^\d{4}-\d{2}-\d{2}-(.+)$/)
+      match[1]
+    else
+      name
+    end
+  end
+
+  private def default_cursor_position(scries : Array(ScryDir)) : Int32
+    return 0 if @input_buffer.empty?
+
+    query = @input_buffer.downcase
+    exact_matches = scries.count { |scry| extract_suffix(scry.name).downcase == query }
+
+    exact_matches >= 2 ? scries.size : 0
+  end
+
   private def main_loop
     loop do
       scries = get_scries
       total_items = scries.size + 1
 
+      if @recalculate_cursor
+        @cursor_pos = default_cursor_position(scries)
+        @recalculate_cursor = false
+      end
       @cursor_pos = @cursor_pos.clamp(0, total_items - 1)
 
       render(scries)
@@ -546,7 +568,7 @@ class ScrySelector
   private def handle_backspace
     return if @input_buffer.empty?
     @input_buffer = @input_buffer[0...-1]
-    @cursor_pos = 0
+    @recalculate_cursor = true
   end
 
   private def handle_delete_key(scries : Array(ScryDir))
@@ -556,7 +578,7 @@ class ScrySelector
   private def handle_character_input(key : String)
     if key.size == 1 && (key[0].alphanumeric? || key[0].in?('-', '_', '.', ' '))
       @input_buffer += key
-      @cursor_pos = 0
+      @recalculate_cursor = true
     end
   end
 

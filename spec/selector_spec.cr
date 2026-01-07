@@ -291,6 +291,56 @@ describe ScrySelector do
 
       FileUtils.rm_rf(test_dir)
     end
+
+    it "defaults cursor to create new when 2+ exact suffix matches" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-05-today"))
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-06-today"))
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-07-today"))
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new("today", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.cursor_pos.should eq(3)
+
+      FileUtils.rm_rf(test_dir)
+    end
+
+    it "defaults cursor to first match when only 1 exact suffix match" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-07-today"))
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-06-yesterday"))
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new("today", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.cursor_pos.should eq(0)
+
+      FileUtils.rm_rf(test_dir)
+    end
+
+    it "defaults cursor to first match when partial matches exist" do
+      test_dir = File.tempname("scry-test")
+      FileUtils.mkdir_p(test_dir)
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-05-today-morning"))
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-06-today-afternoon"))
+      FileUtils.mkdir_p(File.join(test_dir, "2024-01-07-today"))
+
+      keyboard = MockKeyboard.new(["\e"])
+      output = IO::Memory.new
+      selector = ScrySelector.new("today", base_path: test_dir, keyboard: keyboard, output: output, interactive: false)
+
+      selector.run
+      selector.cursor_pos.should eq(0)
+
+      FileUtils.rm_rf(test_dir)
+    end
   end
 
   describe "creation" do
