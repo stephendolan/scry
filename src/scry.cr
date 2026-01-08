@@ -9,6 +9,7 @@ struct Config
 
   getter path : String = "~/scries"
   getter agent : String = "claude"
+  getter continue_flag : String = "--continue"
 
   def self.load : Config
     config_path = File.expand_path("~/.config/scry/config.json", home: Path.home)
@@ -26,6 +27,7 @@ struct Config
   def initialize
     @path = "~/scries"
     @agent = "claude"
+    @continue_flag = "--continue"
   end
 
   def effective_path : String
@@ -34,6 +36,10 @@ struct Config
 
   def effective_agent : String
     ENV["SCRY_AGENT"]? || @agent
+  end
+
+  def effective_continue_flag : String
+    ENV["SCRY_CONTINUE_FLAG"]? || @continue_flag
   end
 
   private def expand_home_path(path : String) : String
@@ -893,17 +899,20 @@ def print_help(config : Config)
     The "default" template is applied automatically (if it exists).
 
   Current config:
-    Path:  #{config.effective_path}
-    Agent: #{config.effective_agent}
+    Path:          #{config.effective_path}
+    Agent:         #{config.effective_agent}
+    Continue flag: #{config.effective_continue_flag.empty? ? "(disabled)" : config.effective_continue_flag}
 
   Environment (overrides config file):
-    SCRY_PATH   Where scries are stored
-    SCRY_AGENT  Command to run after cd
+    SCRY_PATH           Where scries are stored
+    SCRY_AGENT          Command to run after cd
+    SCRY_CONTINUE_FLAG  Flag to add when resuming (set empty to disable)
 
   Config file: ~/.config/scry/config.json
     {
       "path": "~/scries",
-      "agent": "claude"
+      "agent": "claude",
+      "continue_flag": "--continue"
     }
 
   HELP
@@ -1132,7 +1141,14 @@ end
     end
 
     escaped_path = path.gsub("'", "'\\''")
-    puts "cd '#{escaped_path}' && #{config.effective_agent}"
+    agent_cmd = config.effective_agent
+    continue_flag = config.effective_continue_flag
+
+    if result[:type] == :cd && !continue_flag.empty?
+      agent_cmd = "#{agent_cmd} #{continue_flag}"
+    end
+
+    puts "cd '#{escaped_path}' && #{agent_cmd}"
     File.touch(path) rescue nil
   end
 {% end %}
